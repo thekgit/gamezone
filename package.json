@@ -9,9 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.89.0",
+    "framer-motion": "^12.23.26",
     "next": "16.1.1",
+    "qrcode": "^1.5.4",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-qr-code": "^2.0.18"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
