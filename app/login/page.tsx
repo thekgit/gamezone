@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,6 +13,10 @@ const supabase = createClient(
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const next = searchParams.get("next") || "/select";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState("");
@@ -23,6 +27,7 @@ export default function LoginPage() {
   const handleLogin = async () => {
     setMsg("");
     setLoading(true);
+
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
@@ -34,7 +39,8 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/select"); // next page after login
+      // ✅ IMPORTANT: redirect to `next`
+      router.replace(next);
     } finally {
       setLoading(false);
     }
@@ -62,6 +68,7 @@ export default function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
+
           <input
             className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
             placeholder="Password"
