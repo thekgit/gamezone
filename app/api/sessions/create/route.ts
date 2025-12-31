@@ -1,78 +1,110 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+function capacityForGameKey(game: string) {
+  if (game === "pickleball") return 3;
+  if (game === "tabletennis") return 2;
+  return null;
+}
+
+function token(len = 16) {
+  return crypto.randomBytes(len).toString("hex"); // 32 chars if len=16
+}
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const game = body.game;
-    const players = Number(body.players || 1);
+    const body = await req.json().catch(() => ({}));
+    const game = String(body?.game || "");
+    const players = Number(body?.players ?? 1);
 
+    // ✅ Bearer token from client
     const auth = req.headers.get("authorization") || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!token) {
-      return NextResponse.json({ error: "NOT_AUTHENTICATED" }, { status: 401 });
-    }
+    const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!jwt) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
 
     const admin = supabaseAdmin();
-    const { data: userData } = await admin.auth.getUser(token);
-    const user_id = userData?.user?.id;
 
-    if (!user_id) {
-      return NextResponse.json({ error: "INVALID_SESSION" }, { status: 401 });
+    // ✅ resolve user_id
+    const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
+    if (userErr || !userRes?.user?.id) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
+    const user_id = userRes.user.id;
 
-    // Resolve game_id
-    const { data: gameRow } = await admin
+    if (!game) return NextResponse.json({ error: "Missing game" }, { status: 400 });
+
+    // ✅ resolve game_id (expects games.key = pickleball/tabletennis)
+    const { data: g, error: gErr } = await admin
       .from("games")
-      .select("id, key")
+      .select("id, key, name")
       .eq("key", game)
       .single();
 
-    if (!gameRow) {
-      return NextResponse.json({ error: "GAME_NOT_FOUND" }, { status: 400 });
+    if (gErr || !g?.id) return NextResponse.json({ error: "Game not found" }, { status: 400 });
+    const game_id = g.id;
+
+    // ✅ capacity check: count active sessions not ended yet
+    const cap = capacityForGameKey(game);
+    if (cap != null) {
+      const nowIso = new Date().toISOString();
+
+      const { count, error: cErr } = await admin
+        .from("sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("game_id", game_id)
+        .eq("status", "active")
+        .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+
+      if ((count || 0) >= cap) {
+        return NextResponse.json({ error: "SLOT_FULL" }, { status: 400 });
+      }
     }
 
-    // Capacity rule
-    const cap = game === "pickleball" ? 3 : 2;
+    // ✅ create 1-hour session starting NOW
+    const started_at = new Date();
+    const ends_at = new Date(started_at.getTime() + 60 * 60 * 1000);
 
-    const now = new Date();
-    const { count } = await admin
-      .from("sessions")
-      .select("*", { count: "exact", head: true })
-      .eq("game_id", gameRow.id)
-      .eq("status", "active")
-      .gt("end_time", now.toISOString());
+    const entry_token = token(12);
+    const exit_token = token(12);
 
-    if ((count || 0) >= cap) {
-      return NextResponse.json({ error: "SLOT_FULL" }, { status: 400 });
-    }
+    // ✅ pull visitor details from profiles (so admin panel shows name/phone/email)
+    const { data: p } = await admin
+      .from("profiles")
+      .select("full_name, phone, email")
+      .eq("user_id", user_id)
+      .maybeSingle();
 
-    const start = new Date();
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
-
-    const { data: created, error } = await admin
+    const { data: created, error: insErr } = await admin
       .from("sessions")
       .insert({
         user_id,
-        game_id: gameRow.id,
+        game_id,
         players,
-        start_time: start.toISOString(),
-        end_time: end.toISOString(),
         status: "active",
+        started_at: started_at.toISOString(),
+        ends_at: ends_at.toISOString(),
+        start_time: started_at.toISOString(), // keep both for compatibility
+        end_time: ends_at.toISOString(),
+        entry_token,
+        exit_token,
+        visitor_name: p?.full_name ?? null,
+        visitor_phone: p?.phone ?? null,
+        visitor_email: p?.email ?? null,
       })
       .select("id")
       .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
 
     return NextResponse.json({
       ok: true,
-      session_id: created.id,
       message: "Slot has been created successfully",
+      session_id: created.id,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
