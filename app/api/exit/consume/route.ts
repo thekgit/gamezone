@@ -60,15 +60,13 @@ export async function POST(req: Request) {
 
     // ✅ End session + invalidate token immediately (so QR can’t be reused)
     const { error: uErr } = await admin
-      .from("sessions")
-      .update({
-        status: "ended",
-        ended_at: nowIso,
-        end_time: nowIso,
-        ends_at: nowIso,
-        exit_token: null, // important: invalidate QR
-      } as any)
-      .eq("id", sess.id);
+  .from("sessions")
+  .update({
+    status: "ended",
+    ended_at: nowIso,     // ✅ actual QR scan time
+    exit_token: null,     // ✅ invalidate QR so it can’t be reused
+  } as any)
+  .eq("id", sess.id);
 
     if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
 

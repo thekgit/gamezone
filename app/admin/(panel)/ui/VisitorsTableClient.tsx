@@ -5,52 +5,53 @@ import QRCode from "qrcode";
 
 type Row = {
   id: string;
-  created_at: string;
+  status: string;
+  timestamp: string | null;
 
-  status: string | null;
-  exit_token: string | null;
+  name: string;
+  phone: string;
+  email: string;
 
-  ended_at: string | null;
+  game: string;
+
+  start_time: string | null;
   end_time: string | null;
-  ends_at: string | null;
 
-  full_name: string | null;
-  phone: string | null;
-  email: string | null;
-  game_name: string | null;
-
-  slot_start: string | null;
-  slot_end: string | null;
+  exit_time: string | null; // ✅ actual scan time (ended_at)
 };
 
-function fmt(dt: string | null) {
-  if (!dt) return "-";
-  const d = new Date(dt);
-  if (Number.isNaN(d.getTime())) return "-";
+function fmtDateTime(iso: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
   return d.toLocaleString();
 }
 
-function fmtTime(dt: string | null) {
-  if (!dt) return "-";
-  const d = new Date(dt);
-  if (Number.isNaN(d.getTime())) return "-";
+function fmtTime(iso: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtSlot(startIso: string | null, endIso: string | null) {
+  if (!startIso) return "-";
+  const start = fmtTime(startIso);
+  const end = endIso ? fmtTime(endIso) : "-";
+  return `${start} – ${end}`;
 }
 
 export default function VisitorsTableClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [qrUrl, setQrUrl] = useState<string>("");
-  const [qrImg, setQrImg] = useState<string>("");
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
+  const [qrForSession, setQrForSession] = useState<string>("");
 
   const fetchRows = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/visitors", { cache: "no-store" });
+      const res = await fetch("/api/admin/visitors");
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) return;
-      setRows(out.rows || []);
+      setRows(out?.rows || []);
     } finally {
       setLoading(false);
     }
@@ -60,9 +61,9 @@ export default function VisitorsTableClient() {
     fetchRows();
   }, []);
 
-  const genQr = async (session_id: string) => {
-    setQrImg("");
-    setQrUrl("");
+  const onGenerateQR = async (session_id: string) => {
+    setQrDataUrl("");
+    setQrForSession(session_id);
 
     const res = await fetch("/api/admin/exit-code", {
       method: "POST",
@@ -76,106 +77,96 @@ export default function VisitorsTableClient() {
       return;
     }
 
-    const exit_url = String(out.exit_url || "");
-    setQrUrl(exit_url);
+    const url = String(out.exit_url || "");
+    if (!url) {
+      alert("Exit URL missing");
+      return;
+    }
 
-    const dataUrl = await QRCode.toDataURL(exit_url, {
+    const dataUrl = await QRCode.toDataURL(url, {
       margin: 1,
-      width: 260,
-      errorCorrectionLevel: "M",
+      width: 420,
     });
 
-    setQrImg(dataUrl);
-
-    // refresh
-    fetchRows();
+    setQrDataUrl(dataUrl);
   };
 
-  const tableRows = useMemo(() => rows, [rows]);
-
-  return (
-    <div className="w-full">
-      <div className="flex items-start justify-between mb-6">
+  const header = useMemo(() => {
+    return (
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-3xl font-bold">Visitors</h1>
-          <p className="text-white/60 mt-1 text-sm">
+          <h1 className="text-3xl font-bold text-white">Visitors</h1>
+          <p className="text-white/60 text-sm mt-1">
             Active sessions timeline + Generate Exit QR.
           </p>
         </div>
-
         <button
           onClick={fetchRows}
+          className="rounded-xl bg-white text-black px-5 py-3 font-semibold"
           disabled={loading}
-          className="rounded-xl bg-white text-black px-6 py-3 font-semibold disabled:opacity-50"
         >
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
+    );
+  }, [loading]);
 
-      {/* QR Card */}
-      {qrImg && (
-        <div className="mb-6 w-[320px] rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-sm font-semibold mb-2">Exit QR</div>
-          <div className="rounded-xl bg-white p-3 inline-block">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={qrImg} alt="Exit QR" className="w-[260px] h-[260px]" />
+  return (
+    <div className="p-6">
+      {header}
+
+      {!!qrDataUrl && (
+        <div className="mb-6 w-[340px] rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="text-white font-semibold mb-3">Exit QR</div>
+          <img
+            src={qrDataUrl}
+            alt="Exit QR"
+            className="w-full rounded-xl bg-white p-3"
+          />
+          <div className="text-white/50 text-xs mt-2">
+            Session: {qrForSession}
           </div>
-
-          {qrUrl && (
-            <div className="mt-3 text-xs text-white/50 break-all">{qrUrl}</div>
-          )}
         </div>
       )}
 
-      {/* Table */}
       <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="text-white/70">
+        <table className="w-full text-sm text-white">
+          <thead className="text-white/60">
             <tr className="border-b border-white/10">
-              <th className="text-left p-3">Timestamp</th>
-              <th className="text-left p-3">Name</th>
-              <th className="text-left p-3">Phone</th>
-              <th className="text-left p-3">Email</th>
-              <th className="text-left p-3">Game</th>
-              <th className="text-left p-3">Slot</th>
-              <th className="text-left p-3">QR</th>
+              <th className="text-left px-4 py-3">Timestamp</th>
+              <th className="text-left px-4 py-3">Name</th>
+              <th className="text-left px-4 py-3">Phone</th>
+              <th className="text-left px-4 py-3">Email</th>
+              <th className="text-left px-4 py-3">Game</th>
+              <th className="text-left px-4 py-3">Slot</th>
+              <th className="text-left px-4 py-3">Exit Time</th>
+              <th className="text-left px-4 py-3">QR</th>
             </tr>
           </thead>
 
           <tbody>
-            {tableRows.map((r) => {
-              // ✅ BULLETPROOF: session is completed if:
-              // - status not active OR
-              // - any end marker exists OR
-              // - exit_token is NULL (your consume route sets it null after scan)
-              const sessionCompleted =
-                (r.status && r.status !== "active") ||
-                !!r.ended_at ||
-                !!r.end_time ||
-                !!r.ends_at ||
-                r.exit_token === null;
+            {rows.map((r) => {
+              const ended = r.status === "ended" || !!r.exit_time;
 
               return (
-                <tr key={r.id} className="border-b border-white/10">
-                  <td className="p-3">{fmt(r.created_at)}</td>
-                  <td className="p-3">{r.full_name || "-"}</td>
-                  <td className="p-3">{r.phone || "-"}</td>
-                  <td className="p-3">{r.email || "-"}</td>
-                  <td className="p-3">{r.game_name || "-"}</td>
+                <tr key={r.id} className="border-b border-white/10 last:border-0">
+                  <td className="px-4 py-4">{fmtDateTime(r.timestamp)}</td>
+                  <td className="px-4 py-4">{r.name || "-"}</td>
+                  <td className="px-4 py-4">{r.phone || "-"}</td>
+                  <td className="px-4 py-4">{r.email || "-"}</td>
+                  <td className="px-4 py-4">{r.game}</td>
+                  <td className="px-4 py-4">{fmtSlot(r.start_time, r.end_time)}</td>
+                  <td className="px-4 py-4">{fmtTime(r.exit_time)}</td>
 
-                  <td className="p-3">
-                    {fmtTime(r.slot_start)} – {fmtTime(r.slot_end)}
-                  </td>
-
-                  <td className="p-3">
-                    {sessionCompleted ? (
-                      <span className="text-white/50 text-sm">
+                  <td className="px-4 py-4">
+                    {ended ? (
+                      <span className="text-white/50 font-semibold">
                         Session Completed
                       </span>
                     ) : (
                       <button
-                        onClick={() => genQr(r.id)}
-                        className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
+                        onClick={() => onGenerateQR(r.id)}
+                        className="rounded-xl bg-blue-600 px-5 py-2 font-semibold"
                       >
                         Generate QR
                       </button>
@@ -185,10 +176,10 @@ export default function VisitorsTableClient() {
               );
             })}
 
-            {tableRows.length === 0 && (
+            {!rows.length && (
               <tr>
-                <td className="p-6 text-white/50" colSpan={7}>
-                  No sessions found.
+                <td className="px-4 py-8 text-white/50" colSpan={8}>
+                  No sessions yet.
                 </td>
               </tr>
             )}
