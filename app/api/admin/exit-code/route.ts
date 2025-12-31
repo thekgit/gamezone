@@ -3,15 +3,16 @@ import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
-function baseUrlFromEnv(req: Request) {
-  // Prefer explicit env
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
+function getBaseUrl(req: Request) {
+  // 1) If you set NEXT_PUBLIC_SITE_URL on Vercel, use it (must be https://yourdomain.com)
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  if (explicit && !explicit.includes("localhost")) return explicit;
 
-  // Fallback for Vercel
+  // 2) Vercel provides the correct domain here (works for preview + prod)
   const vercel = process.env.VERCEL_URL;
   if (vercel) return `https://${vercel}`;
 
-  // Last fallback (local)
+  // 3) Final fallback: derive from request
   const u = new URL(req.url);
   return `${u.protocol}//${u.host}`;
 }
@@ -23,21 +24,29 @@ export async function POST(req: Request) {
     }
 
     const { session_id } = await req.json();
-    if (!session_id) return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    if (!session_id) {
+      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    }
 
     const admin = supabaseAdmin();
 
-    // 1) Fetch current token
+    // 1) Read existing token (don't regenerate each time)
     const { data: sess, error: sErr } = await admin
       .from("sessions")
       .select("id, exit_token")
       .eq("id", session_id)
       .single();
 
-    if (sErr || !sess) return NextResponse.json({ error: sErr?.message || "Session not found" }, { status: 404 });
+    if (sErr || !sess) {
+      return NextResponse.json(
+        { error: sErr?.message || "Session not found" },
+        { status: 404 }
+      );
+    }
 
-    // 2) Only generate if missing (IMPORTANT)
+    // 2) Create token only if missing
     let exit_token = sess.exit_token as string | null;
+
     if (!exit_token) {
       exit_token = crypto.randomBytes(24).toString("hex");
 
@@ -49,8 +58,8 @@ export async function POST(req: Request) {
       if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
     }
 
-    const base = baseUrlFromEnv(req);
-    const exit_url = `${base}/exit?sid=${encodeURIComponent(session_id)}&token=${encodeURIComponent(exit_token)}`;
+    const baseUrl = getBaseUrl(req);
+    const exit_url = `${baseUrl}/exit?token=${exit_token}`;
 
     return NextResponse.json({ exit_url });
   } catch (e: any) {
