@@ -1,31 +1,19 @@
-"use client";
-
-import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense } from "react";
+import ExitClient from "./ExitClient";
 
 export default function ExitPage() {
-  const sp = useSearchParams();
-  const code = sp.get("code") || "";
-  const [msg, setMsg] = useState("Ending session...");
-
-  useEffect(() => {
-    (async () => {
-      const res = await fetch("/api/exit/consume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) setMsg(data?.error || "Failed to end session");
-      else setMsg("✅ Session ended successfully");
-    })();
-  }, [code]);
-
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
-      <div className="max-w-sm w-full rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-        <div className="text-xl font-bold">{msg}</div>
-      </div>
-    </main>
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
+            <h1 className="text-2xl font-bold">Exit</h1>
+            <p className="mt-3 text-white/70">Loading...</p>
+          </div>
+        </main>
+      }
+    >
+      <ExitClient />
+    </Suspense>
   );
 }
