@@ -1,19 +1,64 @@
-import { Suspense } from "react";
-import ExitClient from "./ExitClient";
+"use client";
+
+import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function ExitPage() {
-  return (
-    <Suspense
-      fallback={
-        <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h1 className="text-2xl font-bold">Exit</h1>
-            <p className="mt-3 text-white/70">Loading...</p>
-          </div>
-        </main>
+  const params = useSearchParams();
+  const router = useRouter();
+  const code = params.get("code");
+
+  const [msg, setMsg] = useState("Ending session...");
+
+  useEffect(() => {
+    const run = async () => {
+      if (!code) {
+        setMsg("Invalid QR");
+        return;
       }
-    >
-      <ExitClient />
-    </Suspense>
+
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
+      if (!token) {
+        setMsg("Please login to end your session");
+        return;
+      }
+
+      const res = await fetch("/api/exit/consume", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ exit_code: code }),
+      });
+
+      const out = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setMsg(out?.error || "Failed to end session");
+        return;
+      }
+
+      setMsg("Session ended successfully ✅");
+      setTimeout(() => router.push("/"), 2000);
+    };
+
+    run();
+  }, [code, router]);
+
+  return (
+    <main className="min-h-screen flex items-center justify-center bg-black text-white">
+      <div className="text-center">
+        <p className="text-lg">{msg}</p>
+      </div>
+    </main>
   );
 }

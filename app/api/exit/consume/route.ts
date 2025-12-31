@@ -1,40 +1,72 @@
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { assertAdmin } from "../../../../lib/assertAdmin";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req: Request) {
   try {
-    const { code } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const exit_code = String(body?.exit_code || "");
 
-    if (!code) {
-      return NextResponse.json({ error: "Missing code" }, { status: 400 });
+    if (!exit_code) {
+      return NextResponse.json({ error: "Missing exit code" }, { status: 400 });
+    }
+
+    // 🔐 Read logged-in user from Bearer token
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+
+    if (!token) {
+      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
 
-    // Find exit code record
-    const { data: exitRow, error: findErr } = await admin
-      .from("exit_codes")
-      .select("id, session_id, used_at")
-      .eq("code", code)
-      .maybeSingle();
+    const { data: userRes, error: userErr } = await admin.auth.getUser(token);
+    if (userErr || !userRes?.user?.id) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
 
-    if (findErr) return NextResponse.json({ error: findErr.message }, { status: 500 });
-    if (!exitRow) return NextResponse.json({ error: "Invalid code" }, { status: 400 });
-    if (exitRow.used_at) return NextResponse.json({ error: "Code already used" }, { status: 400 });
+    const user_id = userRes.user.id;
 
-    // Mark used
-    const { error: updErr } = await admin
-      .from("exit_codes")
-      .update({ used_at: new Date().toISOString() })
-      .eq("id", exitRow.id);
+    // 🔎 Fetch session by exit_code
+    const { data: session, error: sErr } = await admin
+      .from("sessions")
+      .select("id, user_id, status")
+      .eq("exit_code", exit_code)
+      .single();
 
-    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+    if (sErr || !session) {
+      return NextResponse.json({ error: "Invalid or expired QR" }, { status: 400 });
+    }
 
-    // OPTIONAL: you can also end the session here if you have status column
-    // await admin.from("sessions").update({ status: "ended" }).eq("id", exitRow.session_id);
+    if (session.status !== "active") {
+      return NextResponse.json({ error: "Session already ended" }, { status: 400 });
+    }
 
-    return NextResponse.json({ ok: true, session_id: exitRow.session_id });
+    // 🚫 CRITICAL CHECK
+    if (session.user_id !== user_id) {
+      return NextResponse.json(
+        { error: "You are not allowed to end this session" },
+        { status: 403 }
+      );
+    }
+
+    // ✅ END SESSION
+    const { error: endErr } = await admin
+      .from("sessions")
+      .update({
+        status: "ended",
+        ended_at: new Date().toISOString(),
+        exit_code: null, // invalidate QR
+      })
+      .eq("id", session.id);
+
+    if (endErr) {
+      return NextResponse.json({ error: endErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, message: "Session ended successfully" });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
