@@ -17,16 +17,53 @@ export default function GamesClient() {
   const [discountEndTime, setDiscountEndTime] = useState("");
 
   // Right now just placeholder submit handlers (no DB changes)
-  const onSaveGame = () => {
-    alert(
-      `Saved (dummy)\nGame: ${gameName}\nTiming: ${timing}\nTables/Courts: ${courts}\nPrice: ${price}`
-    );
+  const onSaveGame = async () => {
+    const timing_minutes =
+      String(timing).includes("hour") ? 60 : Number(timing) || 60;
+  
+    const res = await fetch("/api/admin/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: gameName,
+        timing_minutes,
+        courts: Number(courts || 1),
+        price: Number(price || 0),
+      }),
+    });
+  
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(data?.error || "Failed to save game");
+  
+    alert("Game saved ✅");
+    setGameName("");
+    setTiming("1 hour");
+    setCourts("2");
+    setPrice("");
   };
-
-  const onSaveDiscount = () => {
-    alert(
-      `Saved (dummy)\nOffer date: ${offerDate}\nEnd date: ${offerEndDate}\nDiscount: ${discount}\nStart time: ${discountStartTime}\nEnd time: ${discountEndTime}`
-    );
+  
+  const onSaveDiscount = async () => {
+    const res = await fetch("/api/admin/discounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        offer_date: offerDate,
+        offer_end_date: offerEndDate,
+        discount_percent: Number(discount || 0),
+        start_time: discountStartTime,
+        end_time: discountEndTime,
+      }),
+    });
+  
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return alert(data?.error || "Failed to save discount");
+  
+    alert("Discount saved ✅");
+    setOfferDate("");
+    setOfferEndDate("");
+    setDiscount("");
+    setDiscountStartTime("");
+    setDiscountEndTime("");
   };
 
   return (
