@@ -1,59 +1,36 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { assertAdmin } from "../../../../lib/assertAdmin";
-
-function getBearer(req: Request) {
-  const h = req.headers.get("authorization") || "";
-  if (!h.toLowerCase().startsWith("bearer ")) return "";
-  return h.slice(7).trim();
-}
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req: Request) {
   try {
-    const token = getBearer(req);
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized (missing token)" }, { status: 401 });
-    }
-
     const body = await req.json().catch(() => ({}));
-    const full_name = String(body?.full_name ?? "").trim();
-    const phone = String(body?.phone ?? "").trim();
-    const email = String(body?.email ?? "").trim().toLowerCase();
+    const { full_name, phone, email } = body;
 
-    if (!full_name || !phone || !email) {
-      return NextResponse.json({ error: "Missing profile fields" }, { status: 400 });
-    }
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!token) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
 
     const admin = supabaseAdmin();
+    const { data: userRes, error: userErr } = await admin.auth.getUser(token);
+    if (userErr || !userRes?.user?.id) return NextResponse.json({ error: "Invalid session" }, { status: 401 });
 
-    // ✅ Get the logged-in user from token
-    const { data: userData, error: userErr } = await admin.auth.getUser(token);
-    if (userErr || !userData?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized (invalid token)" }, { status: 401 });
-    }
+    const user_id = userRes.user.id;
 
-    const user_id = userData.user.id;
-
-    // ✅ Upsert profile by user_id (the correct key)
-    const { error: upsertErr } = await admin
+    const { error: pErr } = await admin
       .from("profiles")
       .upsert(
-        [
-          {
-            user_id,
-            full_name,
-            phone,
-            email,
-          },
-        ],
+        {
+          user_id,
+          full_name: full_name ?? null,
+          phone: phone ?? null,
+          email: email ?? null,
+        },
         { onConflict: "user_id" }
       );
 
-    if (upsertErr) {
-      return NextResponse.json({ error: upsertErr.message }, { status: 500 });
-    }
+    if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
 
-    return NextResponse.json({ ok: true, user_id });
+    return NextResponse.json({ ok: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

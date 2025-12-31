@@ -1,7 +1,7 @@
 "use client";
 
-import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -10,54 +10,57 @@ const supabase = createClient(
 );
 
 export default function ExitClient() {
-  const params = useSearchParams();
   const router = useRouter();
-  const code = params.get("code");
+  const sp = useSearchParams();
 
-  const [msg, setMsg] = useState("Ending session...");
+  const sid = sp.get("sid") || "";
+  const token = sp.get("token") || "";
+
+  const [msg, setMsg] = useState("Processing exit…");
 
   useEffect(() => {
-    const run = async () => {
-      if (!code) {
-        setMsg("Invalid QR");
+    (async () => {
+      if (!sid || !token) {
+        setMsg("Invalid QR (missing info).");
         return;
       }
 
       const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
+      const access = data.session?.access_token;
 
-      if (!token) {
-        setMsg("Please login to end your session");
+      // Not logged in → send to login and come back here
+      if (!access) {
+        const next = `/exit?sid=${encodeURIComponent(sid)}&token=${encodeURIComponent(token)}`;
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
         return;
       }
 
+      // Logged in → consume exit
       const res = await fetch("/api/exit/consume", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${access}`,
         },
-        body: JSON.stringify({ exit_code: code }),
+        body: JSON.stringify({ sid, token }),
       });
 
       const out = await res.json().catch(() => ({}));
-
       if (!res.ok) {
-        setMsg(out?.error || "Failed to end session");
+        setMsg(out?.error || "Invalid / expired QR");
         return;
       }
 
-      setMsg("Session ended successfully ✅");
-      setTimeout(() => router.push("/"), 1500);
-    };
-
-    run();
-  }, [code, router]);
+      setMsg("✅ Slot ended successfully.");
+      setTimeout(() => router.replace("/select"), 1200);
+    })();
+  }, [sid, token, router]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-black text-white">
-      <div className="text-center">
-        <p className="text-lg">{msg}</p>
+    <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
+      <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+        <h1 className="text-2xl font-bold">Exit</h1>
+        <p className="text-white/70 mt-3">{msg}</p>
       </div>
     </main>
   );
