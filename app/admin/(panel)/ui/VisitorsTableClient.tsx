@@ -6,7 +6,10 @@ import QRCode from "qrcode";
 type Row = {
   id: string;
   created_at: string;
-  status: "active" | "ended" | string;
+  status: string;
+
+  // ✅ add exit_token
+  exit_token: string | null;
 
   full_name: string | null;
   phone: string | null;
@@ -67,7 +70,7 @@ export default function VisitorsTableClient() {
     const url = await QRCode.toDataURL(data.exit_url, { width: 240, margin: 1 });
     setQrUrl(url);
 
-    // optional: refresh list so UI stays current
+    // ✅ refresh so button state is always updated
     await load();
   };
 
@@ -79,10 +82,7 @@ export default function VisitorsTableClient() {
           <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
         </div>
 
-        <button
-          onClick={load}
-          className="rounded-lg bg-white text-black px-4 py-2 font-semibold"
-        >
+        <button onClick={load} className="rounded-lg bg-white text-black px-4 py-2 font-semibold">
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
@@ -122,9 +122,9 @@ export default function VisitorsTableClient() {
                   {r.slot_start ? `${timeOnly(r.slot_start)} – ${timeOnly(r.slot_end)}` : "-"}
                 </td>
 
-                {/* ✅ KEY FIX: hide button when ended */}
+                {/* ✅ ONLY QR logic changed: hide button if token is null (scanned/ended) */}
                 <td className="p-3">
-                  {String(r.status).toLowerCase() === "active" ? (
+                  {r.exit_token ? (
                     <button
                       onClick={() => genQr(r.id)}
                       className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
@@ -132,7 +132,7 @@ export default function VisitorsTableClient() {
                       Generate QR
                     </button>
                   ) : (
-                    <span className="text-white/50 text-sm">Ended</span>
+                    <span className="text-white/50 text-sm">Scanned</span>
                   )}
                 </td>
               </tr>

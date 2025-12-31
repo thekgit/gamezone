@@ -10,10 +10,10 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    // 1) sessions (include status + timing fields)
+    // ✅ include exit_token so UI can hide button after scan
     const { data: sessions, error: sErr } = await admin
       .from("sessions")
-      .select("id, user_id, created_at, game_id, slot_id, status, start_time, end_time, started_at, ended_at, ends_at, players")
+      .select("id, user_id, created_at, game_id, slot_id, status, start_time, end_time, started_at, ended_at, ends_at, players, exit_token")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -23,7 +23,7 @@ export async function GET() {
     const gameIds = Array.from(new Set((sessions || []).map((s: any) => s.game_id).filter(Boolean)));
     const slotIds = Array.from(new Set((sessions || []).map((s: any) => s.slot_id).filter(Boolean)));
 
-    // 2) profiles
+    // profiles
     let profilesMap: Record<string, any> = {};
     if (userIds.length) {
       const { data: profiles, error: pErr } = await admin
@@ -32,11 +32,10 @@ export async function GET() {
         .in("user_id", userIds);
 
       if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
-
       profilesMap = Object.fromEntries((profiles || []).map((p: any) => [p.user_id, p]));
     }
 
-    // 3) games
+    // games
     let gamesMap: Record<string, any> = {};
     if (gameIds.length) {
       const { data: games, error: gErr } = await admin
@@ -45,11 +44,10 @@ export async function GET() {
         .in("id", gameIds);
 
       if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
-
       gamesMap = Object.fromEntries((games || []).map((g: any) => [g.id, g]));
     }
 
-    // 4) slots (optional)
+    // slots (optional)
     let slotsMap: Record<string, any> = {};
     if (slotIds.length) {
       const { data: slots, error: slErr } = await admin
@@ -58,17 +56,14 @@ export async function GET() {
         .in("id", slotIds);
 
       if (slErr) return NextResponse.json({ error: slErr.message }, { status: 500 });
-
       slotsMap = Object.fromEntries((slots || []).map((sl: any) => [sl.id, sl]));
     }
 
-    // 5) merge -> rows for UI
     const rows = (sessions || []).map((s: any) => {
       const p = profilesMap[s.user_id] || null;
       const g = gamesMap[s.game_id] || null;
       const sl = s.slot_id ? slotsMap[s.slot_id] || null : null;
 
-      // slot start/end priority: slots table > session fields
       const slot_start = sl?.start_time || s.start_time || s.started_at || s.created_at || null;
       const slot_end = sl?.end_time || s.end_time || s.ended_at || s.ends_at || null;
 
@@ -76,6 +71,9 @@ export async function GET() {
         id: s.id,
         created_at: s.created_at,
         status: s.status || "active",
+
+        // ✅ IMPORTANT: send exit_token to UI
+        exit_token: s.exit_token ?? null,
 
         full_name: p?.full_name ?? null,
         phone: p?.phone ?? null,
