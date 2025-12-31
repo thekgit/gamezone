@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
 import QRCode from "qrcode";
 
 type Row = {
@@ -13,7 +12,6 @@ type Row = {
   email: string | null;
 
   game_name: string | null;
-  
   slot_start: string | null;
   slot_end: string | null;
 };
@@ -33,15 +31,20 @@ export default function AdminDashboardClient() {
     setMsg("");
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/sessions");
-      const data = await res.json().catch(() => ({}));
+      // ✅ IMPORTANT: no-cache + timestamp param
+      const res = await fetch(`/api/admin/sessions?t=${Date.now()}`, {
+        cache: "no-store",
+      });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setMsg(data?.error || "Failed to load");
         return;
       }
 
-      setRows(data.rows || []); // ✅ FIX: API returns rows
+      setRows(data.rows || []);
+    } catch (e: any) {
+      setMsg("Network/server error while loading sessions");
     } finally {
       setLoading(false);
     }
