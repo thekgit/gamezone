@@ -1,49 +1,63 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function ExitClient() {
-  const sp = useSearchParams();
-  const code = sp.get("code"); // or session_id, whatever you use
-  const [msg, setMsg] = useState<string>("Processing...");
+  const params = useSearchParams();
+  const router = useRouter();
+  const code = params.get("code");
+
+  const [msg, setMsg] = useState("Ending session...");
 
   useEffect(() => {
     const run = async () => {
-      try {
-        if (!code) {
-          setMsg("Missing exit code.");
-          return;
-        }
-
-        // Example: call your consume API (adjust endpoint/body to your project)
-        const res = await fetch("/api/exit/consume", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code }),
-        });
-
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-          setMsg(data?.error || "Invalid or expired code.");
-          return;
-        }
-
-        setMsg("✅ Exit recorded successfully.");
-      } catch {
-        setMsg("Server/network error.");
+      if (!code) {
+        setMsg("Invalid QR");
+        return;
       }
+
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
+      if (!token) {
+        setMsg("Please login to end your session");
+        return;
+      }
+
+      const res = await fetch("/api/exit/consume", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ exit_code: code }),
+      });
+
+      const out = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setMsg(out?.error || "Failed to end session");
+        return;
+      }
+
+      setMsg("Session ended successfully ✅");
+      setTimeout(() => router.push("/"), 1500);
     };
 
     run();
-  }, [code]);
+  }, [code, router]);
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
-        <h1 className="text-2xl font-bold">Exit</h1>
-        <p className="mt-3 text-white/70">{msg}</p>
+    <main className="min-h-screen flex items-center justify-center bg-black text-white">
+      <div className="text-center">
+        <p className="text-lg">{msg}</p>
       </div>
     </main>
   );
