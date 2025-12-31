@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { supabaseAdmin } from "../../../lib/supabaseAdmin";
-
+import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
 export async function POST(req: Request) {
   const { session_id } = await req.json();
 
