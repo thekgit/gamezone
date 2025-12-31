@@ -4,15 +4,14 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
 function getBaseUrl(req: Request) {
-  // 1) If you set NEXT_PUBLIC_SITE_URL on Vercel, use it (must be https://yourdomain.com)
+  // 1) Explicit env (recommended)
   const explicit = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
-  if (explicit && !explicit.includes("localhost")) return explicit;
+  if (explicit) return explicit;
 
-  // 2) Vercel provides the correct domain here (works for preview + prod)
-  const vercel = process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel}`;
+  // 2) Vercel runtime domain
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
 
-  // 3) Final fallback: derive from request
+  // 3) Fallback to request origin
   const u = new URL(req.url);
   return `${u.protocol}//${u.host}`;
 }
@@ -23,14 +22,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { session_id } = await req.json();
+    const { session_id } = await req.json().catch(() => ({}));
     if (!session_id) {
       return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
     }
 
     const admin = supabaseAdmin();
 
-    // 1) Read existing token (don't regenerate each time)
+    // Fetch session + existing token
     const { data: sess, error: sErr } = await admin
       .from("sessions")
       .select("id, exit_token")
@@ -38,15 +37,11 @@ export async function POST(req: Request) {
       .single();
 
     if (sErr || !sess) {
-      return NextResponse.json(
-        { error: sErr?.message || "Session not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: sErr?.message || "Session not found" }, { status: 404 });
     }
 
-    // 2) Create token only if missing
+    // Generate token only if missing
     let exit_token = sess.exit_token as string | null;
-
     if (!exit_token) {
       exit_token = crypto.randomBytes(24).toString("hex");
 
@@ -58,8 +53,9 @@ export async function POST(req: Request) {
       if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
     }
 
-    const baseUrl = getBaseUrl(req);
-    const exit_url = `${baseUrl}/exit?token=${exit_token}`;
+    // ✅ Always return full absolute URL
+    const base = getBaseUrl(req);
+    const exit_url = `${base}/exit?token=${encodeURIComponent(exit_token)}`;
 
     return NextResponse.json({ exit_url });
   } catch (e: any) {
