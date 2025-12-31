@@ -51,7 +51,11 @@ export async function GET() {
       new Set(safeSessions.map((s) => s.game_id).filter(Boolean))
     );
     const slotIds = Array.from(
-      new Set(safeSessions.map((s) => s.slot_id).filter(Boolean)) as string[]
+      new Set(
+        safeSessions
+          .map((s) => s.slot_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
     );
 
     // Profiles
