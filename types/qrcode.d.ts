@@ -1,4 +1,1 @@
-declare module "qrcode" {
-    const QRCode: any;
-    export default QRCode;
-  }
+declare module "qrcode";
