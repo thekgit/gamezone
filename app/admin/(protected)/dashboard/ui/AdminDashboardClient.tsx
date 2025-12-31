@@ -14,11 +14,19 @@ type Row = {
   game_name: string | null;
   slot_start: string | null;
   slot_end: string | null;
+
+  status: string | null;
+  exit_time: string | null; // ✅ scan time
 };
 
-function timeOnly(ts?: string | null) {
-  if (!ts) return "-";
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function dt(iso?: string | null) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleString();
+}
+
+function t(iso?: string | null) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function AdminDashboardClient() {
@@ -31,20 +39,13 @@ export default function AdminDashboardClient() {
     setMsg("");
     setLoading(true);
     try {
-      // ✅ IMPORTANT: no-cache + timestamp param
-      const res = await fetch(`/api/admin/sessions?t=${Date.now()}`, {
-        cache: "no-store",
-      });
-
+      const res = await fetch("/api/admin/sessions", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setMsg(data?.error || "Failed to load");
         return;
       }
-
       setRows(data.rows || []);
-    } catch (e: any) {
-      setMsg("Network/server error while loading sessions");
     } finally {
       setLoading(false);
     }
@@ -65,7 +66,10 @@ export default function AdminDashboardClient() {
     });
 
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return setMsg(data?.error || "Failed to generate QR");
+    if (!res.ok) {
+      setMsg(data?.error || "Failed to generate QR");
+      return;
+    }
 
     const url = await QRCode.toDataURL(data.exit_url, { width: 220, margin: 1 });
     setQrUrl(url);
@@ -106,36 +110,53 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Email</th>
               <th className="p-3 text-left">Game</th>
               <th className="p-3 text-left">Slot</th>
+
+              {/* ✅ NEW COLUMN */}
+              <th className="p-3 text-left">Exit Time</th>
+
               <th className="p-3 text-left">QR</th>
             </tr>
           </thead>
 
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
-                <td className="p-3">{new Date(r.created_at).toLocaleString()}</td>
-                <td className="p-3">{r.full_name || "-"}</td>
-                <td className="p-3">{r.phone || "-"}</td>
-                <td className="p-3">{r.email || "-"}</td>
-                <td className="p-3">{r.game_name || "-"}</td>
-                <td className="p-3">
-                  {r.slot_start ? `${timeOnly(r.slot_start)} – ${timeOnly(r.slot_end)}` : "-"}
-                </td>
-                <td className="p-3">
-                  <button
-                    onClick={() => genQr(r.id)}
-                    className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
-                  >
-                    Generate QR
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const completed =
+                (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+
+              return (
+                <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
+                  <td className="p-3">{dt(r.created_at)}</td>
+                  <td className="p-3">{r.full_name || "-"}</td>
+                  <td className="p-3">{r.phone || "-"}</td>
+                  <td className="p-3">{r.email || "-"}</td>
+                  <td className="p-3">{r.game_name || "-"}</td>
+                  <td className="p-3">
+                    {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
+                  </td>
+
+                  {/* ✅ scan time */}
+                  <td className="p-3">{t(r.exit_time)}</td>
+
+                  <td className="p-3">
+                    {completed ? (
+                      <span className="text-white/60 font-semibold">Session Completed</span>
+                    ) : (
+                      <button
+                        onClick={() => genQr(r.id)}
+                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
+                      >
+                        Generate QR
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
 
             {rows.length === 0 && (
               <tr>
-                <td className="p-4 text-white/60" colSpan={7}>
-                  No active sessions found.
+                <td className="p-4 text-white/60" colSpan={8}>
+                  No sessions found.
                 </td>
               </tr>
             )}
