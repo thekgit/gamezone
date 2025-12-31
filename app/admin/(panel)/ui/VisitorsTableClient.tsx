@@ -7,7 +7,7 @@ type Row = {
   id: string;
   created_at: string;
 
-  status: string;
+  status: string | null;
   exit_token: string | null;
 
   ended_at: string | null;
@@ -41,7 +41,6 @@ export default function VisitorsTableClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // QR UI state
   const [qrUrl, setQrUrl] = useState<string>("");
   const [qrImg, setQrImg] = useState<string>("");
 
@@ -80,7 +79,6 @@ export default function VisitorsTableClient() {
     const exit_url = String(out.exit_url || "");
     setQrUrl(exit_url);
 
-    // Generate QR image
     const dataUrl = await QRCode.toDataURL(exit_url, {
       margin: 1,
       width: 260,
@@ -89,7 +87,7 @@ export default function VisitorsTableClient() {
 
     setQrImg(dataUrl);
 
-    // Optional: refresh table (not required but helpful)
+    // refresh
     fetchRows();
   };
 
@@ -124,9 +122,7 @@ export default function VisitorsTableClient() {
           </div>
 
           {qrUrl && (
-            <div className="mt-3 text-xs text-white/50 break-all">
-              {qrUrl}
-            </div>
+            <div className="mt-3 text-xs text-white/50 break-all">{qrUrl}</div>
           )}
         </div>
       )}
@@ -148,12 +144,16 @@ export default function VisitorsTableClient() {
 
           <tbody>
             {tableRows.map((r) => {
-              // ✅ ended if ANY end marker exists OR status is not active
-              const isEnded =
+              // ✅ BULLETPROOF: session is completed if:
+              // - status not active OR
+              // - any end marker exists OR
+              // - exit_token is NULL (your consume route sets it null after scan)
+              const sessionCompleted =
                 (r.status && r.status !== "active") ||
                 !!r.ended_at ||
                 !!r.end_time ||
-                !!r.ends_at;
+                !!r.ends_at ||
+                r.exit_token === null;
 
               return (
                 <tr key={r.id} className="border-b border-white/10">
@@ -167,11 +167,10 @@ export default function VisitorsTableClient() {
                     {fmtTime(r.slot_start)} – {fmtTime(r.slot_end)}
                   </td>
 
-                  {/* ✅ ONLY CHANGE YOU WANTED: Button disappears after scan */}
                   <td className="p-3">
-                    {isEnded ? (
+                    {sessionCompleted ? (
                       <span className="text-white/50 text-sm">
-                        Session ended
+                        Session Completed
                       </span>
                     ) : (
                       <button
