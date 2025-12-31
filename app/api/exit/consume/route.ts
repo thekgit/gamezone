@@ -64,6 +64,7 @@ export async function POST(req: Request) {
   .update({
     status: "ended",
     ended_at: nowIso,     // ✅ actual QR scan time
+    end_time: nowIso,
     exit_token: null,     // ✅ invalidate QR so it can’t be reused
   } as any)
   .eq("id", sess.id);

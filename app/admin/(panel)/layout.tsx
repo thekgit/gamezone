@@ -24,7 +24,7 @@ export default async function AdminPanelLayout({ children }: { children: React.R
           >
             Visitors
           </Link>
-
+          <Link href="/admin/games" className="...">Games</Link>
           <div className="mt-4">
             <LogoutButton />
           </div>
