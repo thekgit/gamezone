@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-// @ts-expect-error qrcode types not detected in CI sometimes
 import QRCode from "qrcode";
 
 type Row = {
