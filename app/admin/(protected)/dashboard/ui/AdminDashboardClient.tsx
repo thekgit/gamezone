@@ -13,6 +13,7 @@ type Row = {
   email: string | null;
 
   game_name: string | null;
+  
   slot_start: string | null;
   slot_end: string | null;
 };
