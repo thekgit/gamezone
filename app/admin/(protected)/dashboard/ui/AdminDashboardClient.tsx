@@ -62,14 +62,14 @@ export default function AdminDashboardClient() {
     }
   };
 
-  // ✅ auto-refresh every 8 seconds
+  // ✅ auto-refresh every 2 seconds
   useEffect(() => {
     load();
-    const id = setInterval(load, 2000);
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
 
-  // ✅ Keep only QRs whose session is still not completed (optional but helpful)
+  // ✅ Map completed sessions
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
@@ -79,8 +79,8 @@ export default function AdminDashboardClient() {
     return m;
   }, [rows]);
 
+  // ✅ Remove QR cards automatically once session completes
   useEffect(() => {
-    // remove QRs automatically for sessions that are completed
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
@@ -137,40 +137,28 @@ export default function AdminDashboardClient() {
 
   return (
     <div className="text-white">
+      {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
-          <p className="text-white/60 text-sm">
-            Auto refresh enabled (every 8s). Generate multiple Exit QRs below.
-          </p>
+          <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
+          {loading && <div className="text-xs text-white/40 mt-1">Updating…</div>}
         </div>
 
-        <div className="flex gap-2">
-          <button
-            onClick={load}
-            className="rounded-lg bg-white text-black px-4 py-2 font-semibold"
-          >
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
-
-          <button
-            onClick={clearAllQrs}
-            className="rounded-lg bg-white/10 px-4 py-2 font-semibold"
-          >
-            Clear QRs
-          </button>
-        </div>
+        <button
+          onClick={clearAllQrs}
+          className="rounded-lg bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
+        >
+          Clear QRs
+        </button>
       </div>
 
       {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
 
-      {/* ✅ MULTI-QR BOARD */}
+      {/* MULTI-QR BOARD */}
       {qrs.length > 0 && (
         <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-semibold">Active Exit QRs</div>
-            <div className="text-xs text-white/50">QRs disappear after session completes</div>
-          </div>
+          <div className="font-semibold mb-3">Active Exit QRs</div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {qrs.map((q) => (
@@ -179,9 +167,7 @@ export default function AdminDashboardClient() {
                 className="rounded-xl border border-white/10 bg-black/30 p-3"
               >
                 <div className="text-sm font-semibold">{q.label}</div>
-                <div className="text-xs text-white/50 mt-1">
-                  Generated: {q.generatedAt}
-                </div>
+                <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
 
                 <div className="mt-3 flex justify-center">
                   <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
@@ -255,11 +241,6 @@ export default function AdminDashboardClient() {
             )}
           </tbody>
         </table>
-      </div>
-
-      <div className="mt-3 text-xs text-white/40">
-        Tip: You can generate multiple QRs; they show in the “Active Exit QRs” box above with the
-        player name/email so nobody gets confused.
       </div>
     </div>
   );
