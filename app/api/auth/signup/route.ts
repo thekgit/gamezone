@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+function siteUrlFromEnv() {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  if (explicit) return explicit;
+  const vercel = process.env.VERCEL_URL;
+  if (vercel) return `https://${vercel}`;
+  return "";
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -14,10 +22,7 @@ export async function POST(req: Request) {
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    const siteUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+    const siteUrl = siteUrlFromEnv();
 
     if (!url || !service || !siteUrl) {
       return NextResponse.json(
@@ -31,83 +36,56 @@ export async function POST(req: Request) {
 
     const admin = createClient(url, service, { auth: { persistSession: false } });
 
-    // ✅ 1) If profile already exists with this email, treat as "already registered"
-    const { data: existingProfile, error: existErr } = await admin
-      .from("profiles")
-      .select("user_id, email")
-      .eq("email", email)
-      .maybeSingle();
+    // IMPORTANT: after accepting email link, we want:
+    // callback -> exchange -> set-password -> select
+    const redirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent(
+      "/set-password?next=/select"
+    )}`;
 
-    // if the table query itself fails
-    if (existErr) {
-      return NextResponse.json({ error: existErr.message }, { status: 500 });
-    }
+    // 1) Invite user
+    const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo,
+    });
 
-    if (existingProfile?.email) {
-      return NextResponse.json(
-        { error: "User already exists. Please login." },
-        { status: 409 }
-      );
-    }
+    // 2) If already registered in AUTH, send reset password link instead
+    if (invErr) {
+      const msg = (invErr.message || "").toLowerCase();
+      if (msg.includes("already") || msg.includes("registered")) {
+        const { error: resetErr } = await admin.auth.resetPasswordForEmail(email, {
+          redirectTo,
+        });
 
-    const redirectTo = `${siteUrl}/auth/callback?next=/set-password`;
-
-    // ✅ 2) Invite user
-    const { data: invited, error: invErr } =
-      await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
-
-      if (invErr) {
-        const msg = (invErr.message || "").toLowerCase();
-      
-        // If user already exists in AUTH, send reset password link instead
-        if (msg.includes("already") || msg.includes("registered")) {
-          const siteUrl =
-            process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
-            (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-      
-          await admin.auth.resetPasswordForEmail(email, {
-            redirectTo: `${siteUrl}/set-password`,
-          });
-      
-          // still ensure profile is present/updated
-          await admin.from("profiles").upsert(
-            { user_id: null, full_name, phone, email }, // user_id may be unknown here
-            { onConflict: "email" }
-          );
-      
-          return NextResponse.json({
-            ok: true,
-            message: "Account already exists. We sent a password reset link to your email.",
-            mode: "reset",
-          });
+        if (resetErr) {
+          return NextResponse.json({ error: resetErr.message }, { status: 500 });
         }
-      
-        return NextResponse.json({ error: invErr.message }, { status: 500 });
+
+        // DO NOT TOUCH profiles with user_id = null. Just send reset link.
+        return NextResponse.json({
+          ok: true,
+          mode: "reset",
+          message: "Account already exists. We sent a password reset link to your email.",
+        });
       }
+
+      return NextResponse.json({ error: invErr.message }, { status: 500 });
+    }
 
     const user_id = invited?.user?.id;
     if (!user_id) {
-      return NextResponse.json(
-        { error: "Invite created but user_id missing" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Invite created but user_id missing" }, { status: 500 });
     }
 
-    // ✅ 3) Upsert using EMAIL as conflict key (because your DB has unique(email))
-    const { error: pErr } = await admin.from("profiles").upsert(
-      { user_id, full_name, phone, email },
-      { onConflict: "email" }
-    );
+    // 3) Upsert profile safely (NO null user_id)
+    // You said your DB has unique(email), so conflict by email is OK.
+    // This will keep user_id correct for that email.
+    const { error: pErr } = await admin
+      .from("profiles")
+      .upsert({ user_id, full_name, phone, email }, { onConflict: "email" });
 
-    if (pErr) {
-      return NextResponse.json({ error: pErr.message }, { status: 500 });
-    }
+    if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, mode: "invite" });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
