@@ -6,11 +6,10 @@ export async function GET(req: Request) {
   const next = url.searchParams.get("next") || "/set-password?next=/select";
 
   if (!code) {
-    // if no code, go home (or login if you want)
-    return NextResponse.redirect(new URL("/", url.origin));
+    return NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(next)}`, url.origin));
   }
 
-  // ✅ Send to exchange page (client) to create session
-  const dest = `/auth/exchange?code=${encodeURIComponent(code)}&next=${encodeURIComponent(next)}`;
-  return NextResponse.redirect(new URL(dest, url.origin));
+  return NextResponse.redirect(
+    new URL(`/auth/exchange?code=${encodeURIComponent(code)}&next=${encodeURIComponent(next)}`, url.origin)
+  );
 }

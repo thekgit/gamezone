@@ -37,9 +37,8 @@ export async function POST(req: Request) {
 
     // ✅ This is the IMPORTANT part:
     // invite link -> /auth/callback -> /auth/exchange -> /set-password -> /select
-    const redirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent(
-      "/set-password?next=/select"
-    )}`;
+    const redirectTo = `${siteUrl}/auth/callback?next=${encodeURIComponent("/set-password?next=/select")}`;
+  
 
     const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
       redirectTo,

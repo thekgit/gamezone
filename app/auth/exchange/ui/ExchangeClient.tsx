@@ -12,35 +12,36 @@ const supabase = createClient(
 export default function ExchangeClient() {
   const router = useRouter();
   const sp = useSearchParams();
-  const [msg, setMsg] = useState("Signing you in…");
+
+  const code = sp.get("code");
+  const next = sp.get("next") || "/set-password?next=/select";
+
+  const [msg, setMsg] = useState("Verifying invite link…");
 
   useEffect(() => {
-    const run = async () => {
-      const code = sp.get("code");
-      const next = sp.get("next") || "/set-password?next=/select";
+    (async () => {
+      try {
+        if (!code) {
+          setMsg("Invite code missing. Please open the invite email again.");
+          return;
+        }
 
-      if (!code) {
-        setMsg("Missing code.");
-        return;
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          setMsg(error.message || "Invite link expired. Please request again.");
+          return;
+        }
+
+        router.replace(next);
+      } catch {
+        setMsg("Network/server error. Try again.");
       }
-
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-
-      if (error) {
-        setMsg(error.message || "Failed to sign in.");
-        return;
-      }
-
-      router.replace(next);
-    };
-
-    run();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    })();
+  }, [code, next, router]);
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
-      <div className="text-sm text-white/80">{msg}</div>
-    </main>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center">
+      <div className="text-sm text-white/70">{msg}</div>
+    </div>
   );
 }
