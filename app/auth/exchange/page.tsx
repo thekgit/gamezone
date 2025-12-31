@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
@@ -9,45 +9,39 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-function ExchangeInner() {
+export default function ExchangePage() {
   const router = useRouter();
   const sp = useSearchParams();
-  const [msg, setMsg] = useState("Signing you in...");
+  const [msg, setMsg] = useState("Signing you in…");
 
   useEffect(() => {
     const run = async () => {
       const code = sp.get("code");
-      const next = sp.get("next") || "/select";
+      const next = sp.get("next") || "/set-password?next=/select";
 
       if (!code) {
-        router.replace("/login");
+        setMsg("Missing code.");
         return;
       }
 
       const { error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (error) {
-        setMsg("Invite link invalid/expired. Please login or request again.");
+        setMsg(error.message || "Failed to sign in.");
         return;
       }
 
+      // ✅ IMPORTANT: after exchange, go to set-password page (NOT login)
       router.replace(next);
     };
 
     run();
-  }, [sp, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
       <div className="text-sm text-white/80">{msg}</div>
     </main>
-  );
-}
-
-export default function ExchangePage() {
-  return (
-    <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
-      <ExchangeInner />
-    </Suspense>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
@@ -9,7 +9,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-function SetPasswordInner() {
+export default function SetPasswordPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const next = sp.get("next") || "/select";
@@ -19,27 +19,34 @@ function SetPasswordInner() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    (async () => {
+  const onSet = async () => {
+    setMsg("");
+
+    if (password.length < 6) {
+      setMsg("Password must be at least 6 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setMsg("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
       const { data } = await supabase.auth.getSession();
       if (!data.session) {
-        router.replace(`/login?next=${encodeURIComponent("/set-password?next=/select")}`);
+        setMsg("Session missing. Please open the email link again.");
+        return;
       }
-    })();
-  }, [router]);
 
-  const onSave = async () => {
-    setMsg("");
-    setLoading(true);
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
 
-    try {
-      if (password.trim().length < 6) return setMsg("Password must be at least 6 characters.");
-      if (password !== confirm) return setMsg("Passwords do not match.");
-
-      const { error } = await supabase.auth.updateUser({ password: password.trim() });
-      if (error) return setMsg(error.message);
-
-      router.replace(next); // -> /select
+      // ✅ SUCCESS: go straight to booking page
+      router.replace(next);
     } finally {
       setLoading(false);
     }
@@ -48,43 +55,38 @@ function SetPasswordInner() {
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-bold">Set New Password</h1>
-        <p className="text-white/60 text-sm mt-2">Create your password to continue.</p>
+        <h1 className="text-3xl font-bold">Set Password</h1>
+        <p className="text-white/60 mt-2 text-sm">
+          Create a new password to continue.
+        </p>
 
-        <input
-          className="mt-4 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-          type="password"
-          placeholder="New password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        <input
-          className="mt-3 w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-          type="password"
-          placeholder="Confirm password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-        />
+        <div className="mt-5 space-y-3">
+          <input
+            className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
+            placeholder="New password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <input
+            className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
+            placeholder="Confirm password"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+        </div>
 
         {msg && <div className="mt-3 text-sm text-red-300">{msg}</div>}
 
         <button
-          onClick={onSave}
           disabled={loading}
-          className="mt-4 w-full rounded-xl py-3 font-semibold bg-white text-black disabled:opacity-40"
+          onClick={onSet}
+          className="w-full mt-5 rounded-xl py-3 font-semibold bg-white text-black disabled:opacity-40"
         >
-          {loading ? "Saving..." : "Save & Continue"}
+          {loading ? "Saving..." : "Save Password"}
         </button>
       </div>
     </main>
-  );
-}
-
-export default function SetPasswordPage() {
-  return (
-    <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>
-      <SetPasswordInner />
-    </Suspense>
   );
 }
