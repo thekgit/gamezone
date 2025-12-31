@@ -142,12 +142,7 @@ export default function AdminDashboardClient() {
           <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
         </div>
 
-        <button
-          onClick={clearAllQrs}
-          className="rounded-lg bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
-        >
         
-        </button>
       </div>
 
       {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
