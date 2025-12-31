@@ -1,75 +1,81 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-function msToHuman(ms: number) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}h ${m}m ${sec}s`;
-  if (m > 0) return `${m}m ${sec}s`;
-  return `${sec}s`;
-}
-
 export async function POST(req: Request) {
   try {
-    const { token } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const token = String(body?.token || "").trim();
+
     if (!token) {
-      return NextResponse.json({ error: "Missing token" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid QR (missing info)." }, { status: 400 });
     }
 
-    // user auth via Bearer
+    // ✅ Require user login (only the same user can end)
     const auth = req.headers.get("authorization") || "";
-    const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!bearer) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+    const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+
+    if (!jwt) {
+      return NextResponse.json({ error: "NOT_LOGGED_IN" }, { status: 401 });
+    }
 
     const admin = supabaseAdmin();
 
-    // resolve user
-    const { data: userRes, error: userErr } = await admin.auth.getUser(bearer);
-    const user_id = userRes?.user?.id;
-    if (userErr || !user_id) return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
+    const userId = userRes?.user?.id;
 
-    // find session by exit_token
+    if (userErr || !userId) {
+      return NextResponse.json({ error: "Invalid session. Please login again." }, { status: 401 });
+    }
+
+    // ✅ Find ACTIVE session by token
     const { data: sess, error: sErr } = await admin
       .from("sessions")
-      .select("id, user_id, status, started_at, start_time, created_at, ended_at, end_time")
+      .select("id, user_id, status, started_at, start_time, created_at")
       .eq("exit_token", token)
+      .eq("status", "active")
       .maybeSingle();
 
-    if (sErr || !sess) return NextResponse.json({ error: "Invalid/expired QR." }, { status: 400 });
+    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
 
-    // ✅ only the same user can end
-    if (sess.user_id !== user_id) {
+    if (!sess?.id) {
+      return NextResponse.json({ error: "Invalid/expired QR." }, { status: 400 });
+    }
+
+    // ✅ Only the SAME booking user can end the session
+    if (sess.user_id !== userId) {
       return NextResponse.json({ error: "This QR is not for your session." }, { status: 403 });
     }
 
-    // If already ended
-    if (sess.status === "ended") {
-      return NextResponse.json({ ok: true, played: "0s", message: "Already ended" });
-    }
-
     const now = new Date();
-    const started =
-      (sess.start_time && new Date(sess.start_time)) ||
-      (sess.started_at && new Date(sess.started_at)) ||
-      (sess.created_at && new Date(sess.created_at)) ||
-      now;
+    const nowIso = now.toISOString();
 
-    const played = msToHuman(now.getTime() - started.getTime());
+    const startIso =
+      (sess.started_at as string | null) ||
+      (sess.start_time as string | null) ||
+      (sess.created_at as string | null) ||
+      nowIso;
 
+    const durationMs = Math.max(0, now.getTime() - new Date(startIso).getTime());
+    const durationMinutes = Math.round(durationMs / 60000);
+
+    // ✅ End session + invalidate token immediately (so QR can’t be reused)
     const { error: uErr } = await admin
       .from("sessions")
       .update({
         status: "ended",
-        ended_at: now.toISOString(),
-        end_time: now.toISOString(),
-      })
+        ended_at: nowIso,
+        end_time: nowIso,
+        ends_at: nowIso,
+        exit_token: null, // important: invalidate QR
+      } as any)
       .eq("id", sess.id);
 
     if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
 
-    return NextResponse.json({ ok: true, played });
+    return NextResponse.json({
+      ok: true,
+      durationMinutes,
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
