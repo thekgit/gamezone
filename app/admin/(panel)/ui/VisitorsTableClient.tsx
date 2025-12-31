@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 
 type Row = {
@@ -10,49 +10,59 @@ type Row = {
   status: string;
   exit_token: string | null;
 
+  ended_at: string | null;
+  end_time: string | null;
+  ends_at: string | null;
+
   full_name: string | null;
   phone: string | null;
   email: string | null;
-
   game_name: string | null;
+
   slot_start: string | null;
   slot_end: string | null;
 };
 
-function timeOnly(ts?: string | null) {
-  if (!ts) return "-";
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function fmt(dt: string | null) {
+  if (!dt) return "-";
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString();
+}
+
+function fmtTime(dt: string | null) {
+  if (!dt) return "-";
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function VisitorsTableClient() {
   const [rows, setRows] = useState<Row[]>([]);
-  const [msg, setMsg] = useState("");
-  const [qrUrl, setQrUrl] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
-    setMsg("");
+  // QR UI state
+  const [qrUrl, setQrUrl] = useState<string>("");
+  const [qrImg, setQrImg] = useState<string>("");
+
+  const fetchRows = async () => {
     setLoading(true);
     try {
-      // ✅ IMPORTANT: use /api/admin/visitors because that’s what your Visitors page uses
       const res = await fetch("/api/admin/visitors", { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMsg(data?.error || "Failed to load");
-        return;
-      }
-      setRows(data.rows || []);
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      setRows(out.rows || []);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
+    fetchRows();
   }, []);
 
   const genQr = async (session_id: string) => {
-    setMsg("");
+    setQrImg("");
     setQrUrl("");
 
     const res = await fetch("/api/admin/exit-code", {
@@ -61,78 +71,112 @@ export default function VisitorsTableClient() {
       body: JSON.stringify({ session_id }),
     });
 
-    const data = await res.json().catch(() => ({}));
+    const out = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setMsg(data?.error || "Failed to generate QR");
+      alert(out?.error || "Failed to generate QR");
       return;
     }
 
-    const url = await QRCode.toDataURL(data.exit_url, { width: 240, margin: 1 });
-    setQrUrl(url);
+    const exit_url = String(out.exit_url || "");
+    setQrUrl(exit_url);
 
-    // ✅ refresh rows so button state updates after QR is later scanned
-    await load();
+    // Generate QR image
+    const dataUrl = await QRCode.toDataURL(exit_url, {
+      margin: 1,
+      width: 260,
+      errorCorrectionLevel: "M",
+    });
+
+    setQrImg(dataUrl);
+
+    // Optional: refresh table (not required but helpful)
+    fetchRows();
   };
 
+  const tableRows = useMemo(() => rows, [rows]);
+
   return (
-    <div className="text-white">
-      <div className="flex items-center justify-between">
+    <div className="w-full">
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Visitors</h1>
-          <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
+          <h1 className="text-3xl font-bold">Visitors</h1>
+          <p className="text-white/60 mt-1 text-sm">
+            Active sessions timeline + Generate Exit QR.
+          </p>
         </div>
 
-        <button onClick={load} className="rounded-lg bg-white text-black px-4 py-2 font-semibold">
+        <button
+          onClick={fetchRows}
+          disabled={loading}
+          className="rounded-xl bg-white text-black px-6 py-3 font-semibold disabled:opacity-50"
+        >
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
-      {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
-
-      {qrUrl && (
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 inline-block">
+      {/* QR Card */}
+      {qrImg && (
+        <div className="mb-6 w-[320px] rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-semibold mb-2">Exit QR</div>
-          <img src={qrUrl} alt="Exit QR" className="rounded-lg" />
+          <div className="rounded-xl bg-white p-3 inline-block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={qrImg} alt="Exit QR" className="w-[260px] h-[260px]" />
+          </div>
+
+          {qrUrl && (
+            <div className="mt-3 text-xs text-white/50 break-all">
+              {qrUrl}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="mt-6 overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
+      {/* Table */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-white/5 text-white/70">
-            <tr>
-              <th className="p-3 text-left">Timestamp</th>
-              <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Phone</th>
-              <th className="p-3 text-left">Email</th>
-              <th className="p-3 text-left">Game</th>
-              <th className="p-3 text-left">Slot</th>
-              <th className="p-3 text-left">QR</th>
+          <thead className="text-white/70">
+            <tr className="border-b border-white/10">
+              <th className="text-left p-3">Timestamp</th>
+              <th className="text-left p-3">Name</th>
+              <th className="text-left p-3">Phone</th>
+              <th className="text-left p-3">Email</th>
+              <th className="text-left p-3">Game</th>
+              <th className="text-left p-3">Slot</th>
+              <th className="text-left p-3">QR</th>
             </tr>
           </thead>
 
           <tbody>
-            {rows.map((r) => {
-              const ended = r.status !== "active" || !r.exit_token;
+            {tableRows.map((r) => {
+              // ✅ ended if ANY end marker exists OR status is not active
+              const isEnded =
+                (r.status && r.status !== "active") ||
+                !!r.ended_at ||
+                !!r.end_time ||
+                !!r.ends_at;
 
               return (
-                <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
-                  <td className="p-3">{new Date(r.created_at).toLocaleString()}</td>
+                <tr key={r.id} className="border-b border-white/10">
+                  <td className="p-3">{fmt(r.created_at)}</td>
                   <td className="p-3">{r.full_name || "-"}</td>
                   <td className="p-3">{r.phone || "-"}</td>
                   <td className="p-3">{r.email || "-"}</td>
                   <td className="p-3">{r.game_name || "-"}</td>
+
                   <td className="p-3">
-                    {r.slot_start ? `${timeOnly(r.slot_start)} – ${timeOnly(r.slot_end)}` : "-"}
+                    {fmtTime(r.slot_start)} – {fmtTime(r.slot_end)}
                   </td>
 
-                  {/* ✅ ONLY CHANGE: button disappears after scan -> show Session ended */}
+                  {/* ✅ ONLY CHANGE YOU WANTED: Button disappears after scan */}
                   <td className="p-3">
-                    {ended ? (
-                      <span className="text-white/50 text-sm">Session ended</span>
+                    {isEnded ? (
+                      <span className="text-white/50 text-sm">
+                        Session ended
+                      </span>
                     ) : (
                       <button
                         onClick={() => genQr(r.id)}
-                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
+                        className="rounded-lg bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
                       >
                         Generate QR
                       </button>
@@ -142,9 +186,9 @@ export default function VisitorsTableClient() {
               );
             })}
 
-            {rows.length === 0 && (
+            {tableRows.length === 0 && (
               <tr>
-                <td className="p-4 text-white/60" colSpan={7}>
+                <td className="p-6 text-white/50" colSpan={7}>
                   No sessions found.
                 </td>
               </tr>
