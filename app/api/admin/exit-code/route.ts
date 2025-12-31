@@ -31,13 +31,11 @@ export async function POST(req: Request) {
     const exit_token = crypto.randomBytes(24).toString("hex");
 
     const { error: uErr } = await admin
-      .from("sessions")
-      .update({
-        exit_token,
-        // optional safety timestamp (only if column exists; harmless if not)
-        exit_token_created_at: new Date().toISOString(),
-      } as any)
-      .eq("id", session_id);
+  .from("sessions")
+  .update({
+    exit_token, // ✅ ONLY this
+  })
+  .eq("id", session_id);
 
     if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
 
