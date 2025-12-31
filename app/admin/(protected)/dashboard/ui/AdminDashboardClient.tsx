@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 
 type Row = {
@@ -16,7 +16,15 @@ type Row = {
   slot_end: string | null;
 
   status: string | null;
-  exit_time: string | null; // ✅ scan time
+  exit_time: string | null;
+};
+
+type QrItem = {
+  session_id: string;
+  label: string; // name/email + game + time
+  dataUrl: string;
+  exit_url: string;
+  generatedAt: string;
 };
 
 function dt(iso?: string | null) {
@@ -32,8 +40,11 @@ function t(iso?: string | null) {
 export default function AdminDashboardClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
-  const [qrUrl, setQrUrl] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // ✅ store MULTIPLE QRs
+  const [qrs, setQrs] = useState<QrItem[]>([]);
+  const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     setMsg("");
@@ -51,55 +62,141 @@ export default function AdminDashboardClient() {
     }
   };
 
+  // ✅ auto-refresh every 8 seconds
   useEffect(() => {
     load();
+    const id = setInterval(load, 2000);
+    return () => clearInterval(id);
   }, []);
 
-  const genQr = async (session_id: string) => {
-    setMsg("");
-    setQrUrl("");
-
-    const res = await fetch("/api/admin/exit-code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id }),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setMsg(data?.error || "Failed to generate QR");
-      return;
+  // ✅ Keep only QRs whose session is still not completed (optional but helpful)
+  const completedMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const r of rows) {
+      const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+      m.set(r.id, completed);
     }
+    return m;
+  }, [rows]);
 
-    const url = await QRCode.toDataURL(data.exit_url, { width: 220, margin: 1 });
-    setQrUrl(url);
+  useEffect(() => {
+    // remove QRs automatically for sessions that are completed
+    setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
+  }, [completedMap]);
+
+  const genQr = async (r: Row) => {
+    const session_id = r.id;
+
+    setMsg("");
+    setGenerating((g) => ({ ...g, [session_id]: true }));
+
+    try {
+      const res = await fetch("/api/admin/exit-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(data?.error || "Failed to generate QR");
+        return;
+      }
+
+      const exit_url: string = data.exit_url;
+      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+
+      const label = [
+        r.full_name || "(No name)",
+        r.email ? `• ${r.email}` : "",
+        r.game_name ? `• ${r.game_name}` : "",
+        r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const item: QrItem = {
+        session_id,
+        label,
+        dataUrl,
+        exit_url,
+        generatedAt: new Date().toLocaleString(),
+      };
+
+      // ✅ keep multiple QRs; replace existing QR for same session_id
+      setQrs((prev) => {
+        const withoutThis = prev.filter((x) => x.session_id !== session_id);
+        return [item, ...withoutThis];
+      });
+    } finally {
+      setGenerating((g) => ({ ...g, [r.id]: false }));
+    }
   };
+
+  const clearAllQrs = () => setQrs([]);
 
   return (
     <div className="text-white">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
-          <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
+          <p className="text-white/60 text-sm">
+            Auto refresh enabled (every 8s). Generate multiple Exit QRs below.
+          </p>
         </div>
 
-        <button
-          onClick={load}
-          className="rounded-lg bg-white text-black px-4 py-2 font-semibold"
-        >
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={load}
+            className="rounded-lg bg-white text-black px-4 py-2 font-semibold"
+          >
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+
+          <button
+            onClick={clearAllQrs}
+            className="rounded-lg bg-white/10 px-4 py-2 font-semibold"
+          >
+            Clear QRs
+          </button>
+        </div>
       </div>
 
       {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
 
-      {qrUrl && (
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 inline-block">
-          <div className="text-sm font-semibold mb-2">Exit QR</div>
-          <img src={qrUrl} alt="Exit QR" className="rounded-lg" />
+      {/* ✅ MULTI-QR BOARD */}
+      {qrs.length > 0 && (
+        <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-semibold">Active Exit QRs</div>
+            <div className="text-xs text-white/50">QRs disappear after session completes</div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {qrs.map((q) => (
+              <div
+                key={q.session_id}
+                className="rounded-xl border border-white/10 bg-black/30 p-3"
+              >
+                <div className="text-sm font-semibold">{q.label}</div>
+                <div className="text-xs text-white/50 mt-1">
+                  Generated: {q.generatedAt}
+                </div>
+
+                <div className="mt-3 flex justify-center">
+                  <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
+                </div>
+
+                <div className="mt-2 text-xs text-white/40 break-all">
+                  Session: {q.session_id}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* TABLE */}
       <div className="mt-6 overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-white/70">
@@ -110,10 +207,7 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Email</th>
               <th className="p-3 text-left">Game</th>
               <th className="p-3 text-left">Slot</th>
-
-              {/* ✅ NEW COLUMN */}
               <th className="p-3 text-left">Exit Time</th>
-
               <th className="p-3 text-left">QR</th>
             </tr>
           </thead>
@@ -133,8 +227,6 @@ export default function AdminDashboardClient() {
                   <td className="p-3">
                     {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
                   </td>
-
-                  {/* ✅ scan time */}
                   <td className="p-3">{t(r.exit_time)}</td>
 
                   <td className="p-3">
@@ -142,10 +234,11 @@ export default function AdminDashboardClient() {
                       <span className="text-white/60 font-semibold">Session Completed</span>
                     ) : (
                       <button
-                        onClick={() => genQr(r.id)}
-                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
+                        onClick={() => genQr(r)}
+                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
+                        disabled={!!generating[r.id]}
                       >
-                        Generate QR
+                        {generating[r.id] ? "Generating..." : "Generate QR"}
                       </button>
                     )}
                   </td>
@@ -162,6 +255,11 @@ export default function AdminDashboardClient() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-3 text-xs text-white/40">
+        Tip: You can generate multiple QRs; they show in the “Active Exit QRs” box above with the
+        player name/email so nobody gets confused.
       </div>
     </div>
   );
