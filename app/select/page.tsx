@@ -51,16 +51,20 @@ export default function SelectPage() {
         body: JSON.stringify({ game, players }),
       });
 
-      const out = await res.json().catch(() => ({}));
+      const raw = await res.text();
+      let out: any = {};
+      try {
+        out = JSON.parse(raw);
+      } catch {}
 
       if (!res.ok) {
-        // show user-friendly message
-        setMsg(out?.error === "SLOT_FULL" ? "Slot Cannot Be Booked" : (out?.error || "Booking failed"));
+        setMsg(out?.error || `Booking failed (${res.status})`);
         return;
       }
 
-      // show success page (simple)
       router.push(`/entry?session_id=${encodeURIComponent(out.session_id)}`);
+    } catch {
+      setMsg("Network or server error");
     } finally {
       setBooking(false);
     }
