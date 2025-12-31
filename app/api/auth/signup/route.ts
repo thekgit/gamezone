@@ -56,16 +56,34 @@ export async function POST(req: Request) {
     const { data: invited, error: invErr } =
       await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
 
-    if (invErr) {
-      const msg = (invErr.message || "").toLowerCase();
-      if (msg.includes("already") || msg.includes("registered")) {
-        return NextResponse.json(
-          { error: "User already exists. Please login." },
-          { status: 409 }
-        );
+      if (invErr) {
+        const msg = (invErr.message || "").toLowerCase();
+      
+        // If user already exists in AUTH, send reset password link instead
+        if (msg.includes("already") || msg.includes("registered")) {
+          const siteUrl =
+            process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+            (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+      
+          await admin.auth.resetPasswordForEmail(email, {
+            redirectTo: `${siteUrl}/set-password`,
+          });
+      
+          // still ensure profile is present/updated
+          await admin.from("profiles").upsert(
+            { user_id: null, full_name, phone, email }, // user_id may be unknown here
+            { onConflict: "email" }
+          );
+      
+          return NextResponse.json({
+            ok: true,
+            message: "Account already exists. We sent a password reset link to your email.",
+            mode: "reset",
+          });
+        }
+      
+        return NextResponse.json({ error: invErr.message }, { status: 500 });
       }
-      return NextResponse.json({ error: invErr.message }, { status: 500 });
-    }
 
     const user_id = invited?.user?.id;
     if (!user_id) {
