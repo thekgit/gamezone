@@ -2,20 +2,20 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-function capacityForGameKey(game: string) {
-  if (game === "pickleball") return 3;
-  if (game === "tabletennis") return 2;
-  return null;
-}
-
 function token(len = 16) {
-  return crypto.randomBytes(len).toString("hex"); // 32 chars if len=16
+  return crypto.randomBytes(len).toString("hex");
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const game = String(body?.game || "");
+
+    // ✅ NEW preferred input
+    const game_id_from_client = String(body?.game_id || "").trim();
+
+    // ✅ Backward compatibility (old client)
+    const game_legacy = String(body?.game || "").trim(); // e.g. "pickleball" or maybe "Table Tennis"
+
     const players = Number(body?.players ?? 1);
 
     // ✅ Bearer token from client
@@ -32,21 +32,55 @@ export async function POST(req: Request) {
     }
     const user_id = userRes.user.id;
 
-    if (!game) return NextResponse.json({ error: "Missing game" }, { status: 400 });
+    // ✅ Resolve game row
+    let gameRow: any = null;
 
-    // ✅ resolve game_id (expects games.key = pickleball/tabletennis)
-    const { data: g, error: gErr } = await admin
-      .from("games")
-      .select("id, key, name")
-      .eq("key", game)
-      .single();
+    if (game_id_from_client) {
+      const { data: g, error: gErr } = await admin
+        .from("games")
+        .select("id, name, duration_minutes, court_count, price, is_active")
+        .eq("id", game_id_from_client)
+        .maybeSingle();
 
-    if (gErr || !g?.id) return NextResponse.json({ error: "Game not found" }, { status: 400 });
-    const game_id = g.id;
+      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
+      gameRow = g;
+    } else if (game_legacy) {
+      // Try by key first (if you still have it), else try by name
+      // This lets old frontend still work.
+      const { data: g1 } = await admin
+        .from("games")
+        .select("id, name, duration_minutes, court_count, price, is_active")
+        // @ts-ignore (key may exist in your schema; harmless if not used)
+        .eq("key", game_legacy)
+        .maybeSingle();
 
-    // ✅ capacity check: count active sessions not ended yet
-    const cap = capacityForGameKey(game);
-    if (cap != null) {
+      if (g1?.id) {
+        gameRow = g1;
+      } else {
+        const { data: g2, error: g2Err } = await admin
+          .from("games")
+          .select("id, name, duration_minutes, court_count, price, is_active")
+          .ilike("name", game_legacy) // name match
+          .maybeSingle();
+
+        if (g2Err) return NextResponse.json({ error: g2Err.message }, { status: 500 });
+        gameRow = g2;
+      }
+    }
+
+    if (!gameRow?.id) {
+      return NextResponse.json({ error: "Game not found" }, { status: 400 });
+    }
+
+    if (gameRow.is_active === false) {
+      return NextResponse.json({ error: "Game is not active" }, { status: 400 });
+    }
+
+    const game_id = gameRow.id;
+
+    // ✅ Capacity check from DB (court_count)
+    const cap = Number(gameRow.court_count ?? 0);
+    if (cap > 0) {
       const nowIso = new Date().toISOString();
 
       const { count, error: cErr } = await admin
@@ -63,9 +97,10 @@ export async function POST(req: Request) {
       }
     }
 
-    // ✅ create 1-hour session starting NOW
+    // ✅ Session duration from DB (duration_minutes), fallback 60
+    const durationMinutes = Number(gameRow.duration_minutes ?? 60);
     const started_at = new Date();
-    const ends_at = new Date(started_at.getTime() + 60 * 60 * 1000);
+    const ends_at = new Date(started_at.getTime() + durationMinutes * 60 * 1000);
 
     const entry_token = token(12);
     const exit_token = token(12);
@@ -86,7 +121,7 @@ export async function POST(req: Request) {
         status: "active",
         started_at: started_at.toISOString(),
         ends_at: ends_at.toISOString(),
-        start_time: started_at.toISOString(), // keep both for compatibility
+        start_time: started_at.toISOString(),
         end_time: ends_at.toISOString(),
         entry_token,
         exit_token,
