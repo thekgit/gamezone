@@ -6,9 +6,8 @@ import QRCode from "qrcode";
 type Row = {
   id: string;
   created_at: string;
-  status: string;
 
-  // ✅ add exit_token
+  status: string;
   exit_token: string | null;
 
   full_name: string | null;
@@ -35,7 +34,8 @@ export default function VisitorsTableClient() {
     setMsg("");
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/sessions", { cache: "no-store" });
+      // ✅ IMPORTANT: use /api/admin/visitors because that’s what your Visitors page uses
+      const res = await fetch("/api/admin/visitors", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setMsg(data?.error || "Failed to load");
@@ -70,7 +70,7 @@ export default function VisitorsTableClient() {
     const url = await QRCode.toDataURL(data.exit_url, { width: 240, margin: 1 });
     setQrUrl(url);
 
-    // ✅ refresh so button state is always updated
+    // ✅ refresh rows so button state updates after QR is later scanned
     await load();
   };
 
@@ -111,32 +111,36 @@ export default function VisitorsTableClient() {
           </thead>
 
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
-                <td className="p-3">{new Date(r.created_at).toLocaleString()}</td>
-                <td className="p-3">{r.full_name || "-"}</td>
-                <td className="p-3">{r.phone || "-"}</td>
-                <td className="p-3">{r.email || "-"}</td>
-                <td className="p-3">{r.game_name || "-"}</td>
-                <td className="p-3">
-                  {r.slot_start ? `${timeOnly(r.slot_start)} – ${timeOnly(r.slot_end)}` : "-"}
-                </td>
+            {rows.map((r) => {
+              const ended = r.status !== "active" || !r.exit_token;
 
-                {/* ✅ ONLY QR logic changed: hide button if token is null (scanned/ended) */}
-                <td className="p-3">
-                  {r.exit_token ? (
-                    <button
-                      onClick={() => genQr(r.id)}
-                      className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
-                    >
-                      Generate QR
-                    </button>
-                  ) : (
-                    <span className="text-white/50 text-sm">Scanned</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+              return (
+                <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
+                  <td className="p-3">{new Date(r.created_at).toLocaleString()}</td>
+                  <td className="p-3">{r.full_name || "-"}</td>
+                  <td className="p-3">{r.phone || "-"}</td>
+                  <td className="p-3">{r.email || "-"}</td>
+                  <td className="p-3">{r.game_name || "-"}</td>
+                  <td className="p-3">
+                    {r.slot_start ? `${timeOnly(r.slot_start)} – ${timeOnly(r.slot_end)}` : "-"}
+                  </td>
+
+                  {/* ✅ ONLY CHANGE: button disappears after scan -> show Session ended */}
+                  <td className="p-3">
+                    {ended ? (
+                      <span className="text-white/50 text-sm">Session ended</span>
+                    ) : (
+                      <button
+                        onClick={() => genQr(r.id)}
+                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
+                      >
+                        Generate QR
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
 
             {rows.length === 0 && (
               <tr>

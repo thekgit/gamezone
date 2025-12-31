@@ -1,65 +1,91 @@
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
-import { assertAdmin } from "../../../../lib/assertAdmin";
-import crypto from "crypto";
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { assertAdmin } from "@/lib/assertAdmin";
 
-const ADMIN_ID = process.env.ADMIN_ID!;
-const ADMIN_SECRET = process.env.ADMIN_SECRET!;
-
-function sign(payload: string) {
-  return crypto.createHmac("sha256", ADMIN_SECRET).update(payload).digest("hex");
-}
-
-function isAdmin(req: NextRequest) {
-  const token = req.cookies.get("admin_token")?.value || "";
-  const [ts, sig] = token.split(".");
-  if (!ts || !sig) return false;
-  const expected = sign(`${ADMIN_ID}.${ts}`);
-  if (expected !== sig) return false;
-  const ageMs = Date.now() - Number(ts);
-  if (!Number.isFinite(ageMs) || ageMs > 7 * 24 * 60 * 60 * 1000) return false;
-  return true;
-}
-
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    if (!isAdmin(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!assertAdmin()) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const admin = supabaseAdmin();
 
-    // sessions -> profiles (user_id), games, slots
-    const { data, error } = await admin
+    // ✅ IMPORTANT: include exit_token + status so UI can hide button after scan
+    const { data: sessions, error } = await admin
       .from("sessions")
-      .select(`
-        id,
-        created_at,
-        user_id,
-        profiles:profiles!sessions_user_id_profiles_fkey(full_name, email, phone),
-        games:games(name),
-        slots:slots(start_time, end_time)
-      `)
+      .select(
+        "id, user_id, game_id, slot_id, created_at, status, exit_token, start_time, end_time, started_at, ended_at, ends_at, players"
+      )
       .order("created_at", { ascending: false })
       .limit(200);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const rows = (data || []).map((r: any) => {
-      const slotLabel =
-        r?.slots?.start_time && r?.slots?.end_time
-          ? `${new Date(r.slots.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${new Date(
-              r.slots.end_time
-            ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-          : null;
+    // profiles
+    const userIds = Array.from(new Set((sessions || []).map((s: any) => s.user_id).filter(Boolean)));
+    let profilesMap: Record<string, any> = {};
+
+    if (userIds.length) {
+      const { data: profiles, error: pErr } = await admin
+        .from("profiles")
+        .select("user_id, full_name, phone, email")
+        .in("user_id", userIds);
+
+      if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
+      profilesMap = Object.fromEntries((profiles || []).map((p: any) => [p.user_id, p]));
+    }
+
+    // games
+    const gameIds = Array.from(new Set((sessions || []).map((s: any) => s.game_id).filter(Boolean)));
+    let gamesMap: Record<string, any> = {};
+
+    if (gameIds.length) {
+      const { data: games, error: gErr } = await admin
+        .from("games")
+        .select("id, name, key")
+        .in("id", gameIds);
+
+      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
+      gamesMap = Object.fromEntries((games || []).map((g: any) => [g.id, g]));
+    }
+
+    // slots (optional)
+    const slotIds = Array.from(new Set((sessions || []).map((s: any) => s.slot_id).filter(Boolean)));
+    let slotsMap: Record<string, any> = {};
+
+    if (slotIds.length) {
+      const { data: slots, error: slErr } = await admin
+        .from("slots")
+        .select("id, start_time, end_time")
+        .in("id", slotIds);
+
+      if (slErr) return NextResponse.json({ error: slErr.message }, { status: 500 });
+      slotsMap = Object.fromEntries((slots || []).map((sl: any) => [sl.id, sl]));
+    }
+
+    const rows = (sessions || []).map((s: any) => {
+      const p = profilesMap[s.user_id] || null;
+      const g = gamesMap[s.game_id] || null;
+      const sl = s.slot_id ? slotsMap[s.slot_id] || null : null;
+
+      const slot_start = sl?.start_time || s.start_time || s.started_at || s.created_at || null;
+      const slot_end = sl?.end_time || s.end_time || s.ended_at || s.ends_at || null;
 
       return {
-        id: r.id,
-        created_at: r.created_at,
-        user_id: r.user_id,
-        full_name: r.profiles?.full_name ?? null,
-        email: r.profiles?.email ?? null,
-        phone: r.profiles?.phone ?? null,
-        game_name: r.games?.name ?? null,
-        slot_label: slotLabel,
+        id: s.id,
+        created_at: s.created_at,
+
+        // ✅ these two drive the button state
+        status: s.status || "active",
+        exit_token: s.exit_token ?? null,
+
+        full_name: p?.full_name ?? null,
+        phone: p?.phone ?? null,
+        email: p?.email ?? null,
+        game_name: g?.name ?? null,
+
+        slot_start,
+        slot_end,
       };
     });
 
