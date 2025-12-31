@@ -21,7 +21,7 @@ type Row = {
 
 type QrItem = {
   session_id: string;
-  label: string; // name/email + game + time
+  label: string;
   dataUrl: string;
   exit_url: string;
   generatedAt: string;
@@ -40,15 +40,13 @@ function t(iso?: string | null) {
 export default function AdminDashboardClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  // ✅ store MULTIPLE QRs
+  // multi QR storage
   const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
   const load = async () => {
     setMsg("");
-    setLoading(true);
     try {
       const res = await fetch("/api/admin/sessions", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
@@ -57,19 +55,19 @@ export default function AdminDashboardClient() {
         return;
       }
       setRows(data.rows || []);
-    } finally {
-      setLoading(false);
+    } catch {
+      setMsg("Failed to load");
     }
   };
 
-  // ✅ auto-refresh every 2 seconds
+  // auto-refresh every 5 seconds
   useEffect(() => {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
 
-  // ✅ Map completed sessions
+  // map completed sessions
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
@@ -79,7 +77,7 @@ export default function AdminDashboardClient() {
     return m;
   }, [rows]);
 
-  // ✅ Remove QR cards automatically once session completes
+  // remove QR cards once session completes
   useEffect(() => {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
@@ -123,13 +121,13 @@ export default function AdminDashboardClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      // ✅ keep multiple QRs; replace existing QR for same session_id
+      // keep multiple QRs; replace existing for same session
       setQrs((prev) => {
         const withoutThis = prev.filter((x) => x.session_id !== session_id);
         return [item, ...withoutThis];
       });
     } finally {
-      setGenerating((g) => ({ ...g, [r.id]: false }));
+      setGenerating((g) => ({ ...g, [session_id]: false }));
     }
   };
 
@@ -142,7 +140,6 @@ export default function AdminDashboardClient() {
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
           <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
-          
         </div>
 
         <button
@@ -162,10 +159,7 @@ export default function AdminDashboardClient() {
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {qrs.map((q) => (
-              <div
-                key={q.session_id}
-                className="rounded-xl border border-white/10 bg-black/30 p-3"
-              >
+              <div key={q.session_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
                 <div className="text-sm font-semibold">{q.label}</div>
                 <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
 
@@ -173,9 +167,7 @@ export default function AdminDashboardClient() {
                   <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
                 </div>
 
-                <div className="mt-2 text-xs text-white/40 break-all">
-                  Session: {q.session_id}
-                </div>
+                <div className="mt-2 text-xs text-white/40 break-all">Session: {q.session_id}</div>
               </div>
             ))}
           </div>
@@ -200,8 +192,7 @@ export default function AdminDashboardClient() {
 
           <tbody>
             {rows.map((r) => {
-              const completed =
-                (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+              const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
 
               return (
                 <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
@@ -217,12 +208,12 @@ export default function AdminDashboardClient() {
 
                   <td className="p-3">
                     {completed ? (
-                      <span className="text-white/60 font-semibold">Session Completed</span>
+                      <span className="text-green-400 font-semibold">Session Completed</span>
                     ) : (
                       <button
                         onClick={() => genQr(r)}
-                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
                         disabled={!!generating[r.id]}
+                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {generating[r.id] ? "Generating..." : "Generate QR"}
                       </button>
