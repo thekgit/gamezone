@@ -142,7 +142,7 @@ export default function AdminDashboardClient() {
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
           <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
-          {loading && <div className="text-xs text-white/40 mt-1">Updating…</div>}
+          
         </div>
 
         <button
