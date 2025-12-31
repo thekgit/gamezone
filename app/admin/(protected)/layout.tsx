@@ -18,16 +18,25 @@ export default async function ProtectedAdminLayout({
         <h2 className="text-lg font-bold">Admin</h2>
         <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
 
-        {/* ONLY ONE TAB (Visitors) */}
-        <Link
-          href="/admin/dashboard"
-          className="block rounded-lg px-3 py-2 bg-blue-600"
-        >
-          Visitors
-        </Link>
+        {/* Tabs */}
+        <div className="space-y-2">
+          <Link
+            href="/admin/dashboard"
+            className="block rounded-lg px-3 py-2 bg-blue-600"
+          >
+            Visitors
+          </Link>
+
+          <Link
+            href="/admin/games"
+            className="block rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15"
+          >
+            Games
+          </Link>
+        </div>
 
         <form action="/api/admin/logout" method="post">
-          <button className="mt-6 w-full rounded-lg bg-white/10 px-3 py-2 text-left">
+          <button className="mt-6 w-full rounded-lg bg-white/10 px-3 py-2 text-left hover:bg-white/15">
             Logout
           </button>
         </form>
