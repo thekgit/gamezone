@@ -146,7 +146,7 @@ export default function AdminDashboardClient() {
           onClick={clearAllQrs}
           className="rounded-lg bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
         >
-          Clear QRs
+        
         </button>
       </div>
 
