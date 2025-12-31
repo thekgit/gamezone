@@ -12,36 +12,36 @@ const supabase = createClient(
 export default function ExchangeClient() {
   const router = useRouter();
   const sp = useSearchParams();
-
-  const code = sp.get("code");
-  const next = sp.get("next") || "/set-password?next=/select";
-
-  const [msg, setMsg] = useState("Verifying invite link…");
+  const [msg, setMsg] = useState("Exchanging link…");
 
   useEffect(() => {
-    (async () => {
-      try {
-        if (!code) {
-          setMsg("Invite code missing. Please open the invite email again.");
-          return;
-        }
+    const run = async () => {
+      const code = sp.get("code");
+      const next = sp.get("next") || "/select";
 
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          setMsg(error.message || "Invite link expired. Please request again.");
-          return;
-        }
-
-        router.replace(next);
-      } catch {
-        setMsg("Network/server error. Try again.");
+      if (!code) {
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
+        return;
       }
-    })();
-  }, [code, next, router]);
+
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (error) {
+        setMsg("Link expired. Please login again.");
+        router.replace(`/login?next=${encodeURIComponent(next)}`);
+        return;
+      }
+
+      // ✅ Now session exists in browser -> go next
+      router.replace(next);
+    };
+
+    run();
+  }, [sp, router]);
 
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <div className="text-sm text-white/70">{msg}</div>
+      {msg}
     </div>
   );
 }
