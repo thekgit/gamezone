@@ -1,4 +1,4 @@
-import ExitClient from "./ui/ExitClient";
+import ExitClient from "./ExitClient";
 
 export const dynamic = "force-dynamic";
 
