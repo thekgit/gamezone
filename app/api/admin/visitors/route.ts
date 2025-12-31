@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { assertAdmin } from "../../../../lib/assertAdmin";
 import crypto from "crypto";
 
 const ADMIN_ID = process.env.ADMIN_ID!;

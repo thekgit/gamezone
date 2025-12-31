@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { assertAdmin } from "../../../../lib/assertAdmin";
 
 function getBearer(req: Request) {
   const h = req.headers.get("authorization") || "";

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { assertAdmin } from "@/lib/assertAdmin";
+import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { assertAdmin } from "../../../../lib/assertAdmin";
 
 export async function GET() {
   try {

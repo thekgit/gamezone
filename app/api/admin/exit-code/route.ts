@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { assertAdmin } from "@/lib/assertAdmin";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { supabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { assertAdmin } from "../../../../lib/assertAdmin";
 import crypto from "crypto";
 
 function makeCode() {
