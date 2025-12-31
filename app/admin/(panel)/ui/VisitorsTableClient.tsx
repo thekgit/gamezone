@@ -1,35 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
 type Row = {
   id: string;
   status: string;
   timestamp: string | null;
-
   name: string;
   phone: string;
   email: string;
-
   game: string;
-
   start_time: string | null;
   end_time: string | null;
-
-  exit_time: string | null; // ✅ actual scan time (ended_at)
+  exit_time: string | null; // ended_at
 };
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "-";
-  const d = new Date(iso);
-  return d.toLocaleString();
+  return new Date(iso).toLocaleString();
 }
 
 function fmtTime(iso: string | null) {
   if (!iso) return "-";
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtSlot(startIso: string | null, endIso: string | null) {
@@ -43,13 +37,13 @@ export default function VisitorsTableClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [qrDataUrl, setQrDataUrl] = useState<string>("");
-  const [qrForSession, setQrForSession] = useState<string>("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [qrForSession, setQrForSession] = useState("");
 
   const fetchRows = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/visitors");
+      const res = await fetch("/api/admin/visitors", { cache: "no-store" });
       const out = await res.json().catch(() => ({}));
       setRows(out?.rows || []);
     } finally {
@@ -83,22 +77,16 @@ export default function VisitorsTableClient() {
       return;
     }
 
-    const dataUrl = await QRCode.toDataURL(url, {
-      margin: 1,
-      width: 420,
-    });
-
+    const dataUrl = await QRCode.toDataURL(url, { margin: 1, width: 420 });
     setQrDataUrl(dataUrl);
   };
 
-  const header = useMemo(() => {
-    return (
+  return (
+    <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-3xl font-bold text-white">Visitors</h1>
-          <p className="text-white/60 text-sm mt-1">
-            Active sessions timeline + Generate Exit QR.
-          </p>
+          <p className="text-white/60 text-sm mt-1">Active sessions timeline + Generate Exit QR.</p>
         </div>
         <button
           onClick={fetchRows}
@@ -108,24 +96,12 @@ export default function VisitorsTableClient() {
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
-    );
-  }, [loading]);
-
-  return (
-    <div className="p-6">
-      {header}
 
       {!!qrDataUrl && (
         <div className="mb-6 w-[340px] rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-white font-semibold mb-3">Exit QR</div>
-          <img
-            src={qrDataUrl}
-            alt="Exit QR"
-            className="w-full rounded-xl bg-white p-3"
-          />
-          <div className="text-white/50 text-xs mt-2">
-            Session: {qrForSession}
-          </div>
+          <img src={qrDataUrl} alt="Exit QR" className="w-full rounded-xl bg-white p-3" />
+          <div className="text-white/50 text-xs mt-2">Session: {qrForSession}</div>
         </div>
       )}
 
@@ -160,9 +136,7 @@ export default function VisitorsTableClient() {
 
                   <td className="px-4 py-4">
                     {ended ? (
-                      <span className="text-white/50 font-semibold">
-                        Session Completed
-                      </span>
+                      <span className="text-white/50 font-semibold">Session Completed</span>
                     ) : (
                       <button
                         onClick={() => onGenerateQR(r.id)}
