@@ -39,7 +39,7 @@ export default function LoginPage() {
         return;
       }
 
-      // ✅ IMPORTANT: redirect to `next`
+      // ✅ go back to QR exit page (or /select)
       router.replace(next);
     } finally {
       setLoading(false);
@@ -55,9 +55,7 @@ export default function LoginPage() {
           className="mb-6"
         >
           <h1 className="text-3xl font-bold">Login</h1>
-          <p className="text-white/60 mt-2 text-sm">
-            Use your email + password.
-          </p>
+          <p className="text-white/60 mt-2 text-sm">Use your email + password.</p>
         </motion.div>
 
         <div className="space-y-3">
