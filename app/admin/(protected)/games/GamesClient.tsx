@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 
 type GameRow = {
   id: string;
+  key: string;
   name: string;
   duration_minutes: number;
   court_count: number;
-  price: number;
+  capacity_per_slot: number;
+  price_rupees: number;
   is_active: boolean;
   created_at: string;
 };
@@ -21,7 +23,7 @@ function minsToLabel(mins: number) {
 export default function GamesClient() {
   // --- Add New Game form state ---
   const [gameName, setGameName] = useState("");
-  const [timing, setTiming] = useState("1 hour"); // accepts "1 hour" or "60"
+  const [timing, setTiming] = useState("1 hour"); // accepts "1 hour" or minutes like "90"
   const [courts, setCourts] = useState("2");
   const [price, setPrice] = useState("");
 
@@ -53,7 +55,11 @@ export default function GamesClient() {
         setMsg(data?.error || "Failed to load games");
         return;
       }
-      setGames(data?.games || []);
+
+      const list: GameRow[] = (data?.games || []).filter(
+        (g: GameRow) => g.is_active !== false
+      );
+      setGames(list);
     } finally {
       setLoadingGames(false);
     }
@@ -66,26 +72,31 @@ export default function GamesClient() {
   const parseTimingToMinutes = (val: string) => {
     const s = String(val || "").trim().toLowerCase();
     if (!s) return 60;
-    if (s.includes("hour")) return 60; // simple: default 1 hour
-    const n = Number(s);
-    return Number.isFinite(n) && n > 0 ? n : 60;
-  };
-  
-  // ✅ Save new game
-  const timing_minutes =
-  String(timing).toLowerCase().includes("hour") ? 60 : Number(timing) || 60;
 
-  const res = await fetch("/api/admin/games", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    name: gameName,
-    duration_minutes: timing_minutes,
-    court_count: Number(courts || 1),      // table/court count
-    price_rupees: Number(price || 0),      // price in rupees
-    capacity_per_slot: 1,                  // required by DB
-   }),
-   });
+    if (s.includes("hour")) {
+      const num = Number(s.replace(/[^0-9.]/g, "")) || 1;
+      return Math.max(1, Math.round(num * 60));
+    }
+
+    const n = Number(s);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 60;
+  };
+
+  // ✅ Save new game
+  const onSaveGame = async () => {
+    const duration_minutes = parseTimingToMinutes(timing);
+
+    const res = await fetch("/api/admin/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: gameName,
+        duration_minutes,
+        court_count: Number(courts || 1),
+        price_rupees: Number(price || 0),
+        capacity_per_slot: 1,
+      }),
+    });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return alert(data?.error || "Failed to save game");
@@ -96,11 +107,10 @@ export default function GamesClient() {
     setCourts("2");
     setPrice("");
 
-    // ✅ refresh list
     await loadGames();
   };
 
-  // ✅ Discount save (kept your logic; assumes /api/admin/discounts exists)
+  // ✅ Save Discount (kept as-is)
   const onSaveDiscount = async () => {
     const res = await fetch("/api/admin/discounts", {
       method: "POST",
@@ -131,7 +141,7 @@ export default function GamesClient() {
     setEditName(g.name || "");
     setEditMins(String(g.duration_minutes ?? 60));
     setEditCourts(String(g.court_count ?? 1));
-    setEditPrice(String(g.price ?? 0));
+    setEditPrice(String(g.price_rupees ?? 0));
   };
 
   const cancelEdit = () => {
@@ -152,7 +162,7 @@ export default function GamesClient() {
         name: editName,
         duration_minutes: Number(editMins || 60),
         court_count: Number(editCourts || 1),
-        price: Number(editPrice || 0),
+        price_rupees: Number(editPrice || 0),
       }),
     });
 
@@ -163,7 +173,7 @@ export default function GamesClient() {
     await loadGames();
   };
 
-  // ✅ Delete game (soft delete = is_active false)
+  // ✅ Delete game (soft delete)
   const deleteGame = async (id: string) => {
     if (!confirm("Delete this game? (It will be hidden from bookings)")) return;
 
@@ -181,14 +191,10 @@ export default function GamesClient() {
 
   return (
     <div className="mt-6 space-y-6">
-      {/* TOP FORMS */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* SECTION 1: Add new game */}
+        {/* Add New Game */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <h2 className="text-xl font-bold">Add New Game</h2>
-          <p className="text-white/60 text-sm mt-1">
-            Create a game entry (editable later).
-          </p>
 
           <div className="mt-5 space-y-3">
             <div>
@@ -206,31 +212,28 @@ export default function GamesClient() {
               <input
                 value={timing}
                 onChange={(e) => setTiming(e.target.value)}
-                placeholder="ex: 1 hour"
+                placeholder="ex: 1 hour (or 90)"
                 className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
               />
-              <p className="text-xs text-white/40 mt-1">
-                Tip: keep “1 hour” (60 minutes). You can also enter minutes like 90.
-              </p>
             </div>
 
             <div>
-              <label className="text-xs text-white/60">Table / Court count</label>
+              <label className="text-xs text-white/60">Table/Court count</label>
               <input
                 value={courts}
                 onChange={(e) => setCourts(e.target.value)}
-                placeholder="ex: 2"
+                placeholder="ex: 3"
                 inputMode="numeric"
                 className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
               />
             </div>
 
             <div>
-              <label className="text-xs text-white/60">Price</label>
+              <label className="text-xs text-white/60">Price (₹)</label>
               <input
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                placeholder="ex: 200"
+                placeholder="ex: 500"
                 inputMode="numeric"
                 className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
               />
@@ -245,64 +248,16 @@ export default function GamesClient() {
           </div>
         </div>
 
-        {/* SECTION 2: Discount value */}
+        {/* Discount */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <h2 className="text-xl font-bold">Discount Value</h2>
-          <p className="text-white/60 text-sm mt-1">
-            Set discount rules (editable later).
-          </p>
 
           <div className="mt-5 space-y-3">
-            <div>
-              <label className="text-xs text-white/60">Offer date</label>
-              <input
-                type="date"
-                value={offerDate}
-                onChange={(e) => setOfferDate(e.target.value)}
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-white/60">Offer end date</label>
-              <input
-                type="date"
-                value={offerEndDate}
-                onChange={(e) => setOfferEndDate(e.target.value)}
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-white/60">Offer discount (%)</label>
-              <input
-                value={discount}
-                onChange={(e) => setDiscount(e.target.value)}
-                placeholder="ex: 10"
-                inputMode="numeric"
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-white/60">Discount start time</label>
-              <input
-                type="time"
-                value={discountStartTime}
-                onChange={(e) => setDiscountStartTime(e.target.value)}
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-white/60">Discount end time</label>
-              <input
-                type="time"
-                value={discountEndTime}
-                onChange={(e) => setDiscountEndTime(e.target.value)}
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
+            <input type="date" value={offerDate} onChange={(e) => setOfferDate(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
+            <input type="date" value={offerEndDate} onChange={(e) => setOfferEndDate(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
+            <input value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="Discount %" className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
+            <input type="time" value={discountStartTime} onChange={(e) => setDiscountStartTime(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
+            <input type="time" value={discountEndTime} onChange={(e) => setDiscountEndTime(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
 
             <button
               onClick={onSaveDiscount}
@@ -314,16 +269,10 @@ export default function GamesClient() {
         </div>
       </div>
 
-      {/* ✅ DOWNSIDE SECTION: GAMES LIST */}
+      {/* Games list */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-bold">Games</h2>
-            <p className="text-white/60 text-sm mt-1">
-              This list is used in bookings. Edit/Delete updates the booking options.
-            </p>
-          </div>
-
+          <h2 className="text-xl font-bold">Games</h2>
           <button
             onClick={loadGames}
             className="rounded-lg bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
@@ -348,30 +297,17 @@ export default function GamesClient() {
 
             <tbody>
               {loadingGames ? (
-                <tr>
-                  <td className="p-4 text-white/60" colSpan={5}>
-                    Loading games...
-                  </td>
-                </tr>
+                <tr><td className="p-4 text-white/60" colSpan={5}>Loading…</td></tr>
               ) : games.length === 0 ? (
-                <tr>
-                  <td className="p-4 text-white/60" colSpan={5}>
-                    No games found.
-                  </td>
-                </tr>
+                <tr><td className="p-4 text-white/60" colSpan={5}>No games found.</td></tr>
               ) : (
                 games.map((g) => {
                   const isEditing = editingId === g.id;
-
                   return (
                     <tr key={g.id} className="border-t border-white/10">
                       <td className="p-3">
                         {isEditing ? (
-                          <input
-                            value={editName}
-                            onChange={(e) => setEditName(e.target.value)}
-                            className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
-                          />
+                          <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
                         ) : (
                           <span className="font-semibold">{g.name}</span>
                         )}
@@ -379,12 +315,7 @@ export default function GamesClient() {
 
                       <td className="p-3">
                         {isEditing ? (
-                          <input
-                            value={editMins}
-                            onChange={(e) => setEditMins(e.target.value)}
-                            inputMode="numeric"
-                            className="w-32 rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
-                          />
+                          <input value={editMins} onChange={(e) => setEditMins(e.target.value)} inputMode="numeric" className="w-32 rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
                         ) : (
                           minsToLabel(g.duration_minutes)
                         )}
@@ -392,12 +323,7 @@ export default function GamesClient() {
 
                       <td className="p-3">
                         {isEditing ? (
-                          <input
-                            value={editCourts}
-                            onChange={(e) => setEditCourts(e.target.value)}
-                            inputMode="numeric"
-                            className="w-24 rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
-                          />
+                          <input value={editCourts} onChange={(e) => setEditCourts(e.target.value)} inputMode="numeric" className="w-24 rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
                         ) : (
                           g.court_count
                         )}
@@ -405,47 +331,22 @@ export default function GamesClient() {
 
                       <td className="p-3">
                         {isEditing ? (
-                          <input
-                            value={editPrice}
-                            onChange={(e) => setEditPrice(e.target.value)}
-                            inputMode="numeric"
-                            className="w-28 rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none focus:border-white/30"
-                          />
+                          <input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} inputMode="numeric" className="w-28 rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
                         ) : (
-                          `₹${g.price}`
+                          `₹${g.price_rupees}`
                         )}
                       </td>
 
                       <td className="p-3">
                         {isEditing ? (
                           <div className="flex gap-2">
-                            <button
-                              onClick={() => saveEdit(g.id)}
-                              className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={cancelEdit}
-                              className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
-                            >
-                              Cancel
-                            </button>
+                            <button onClick={() => saveEdit(g.id)} className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500">Save</button>
+                            <button onClick={cancelEdit} className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15">Cancel</button>
                           </div>
                         ) : (
                           <div className="flex gap-2">
-                            <button
-                              onClick={() => startEdit(g)}
-                              className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => deleteGame(g.id)}
-                              className="rounded-lg bg-red-600/80 px-3 py-2 font-semibold hover:bg-red-600"
-                            >
-                              Delete
-                            </button>
+                            <button onClick={() => startEdit(g)} className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15">Edit</button>
+                            <button onClick={() => deleteGame(g.id)} className="rounded-lg bg-red-600/80 px-3 py-2 font-semibold hover:bg-red-600">Delete</button>
                           </div>
                         )}
                       </td>
