@@ -159,12 +159,7 @@ export default function GamesClient() {
 
   return (
     <div className="text-white">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold">Games</h1>
-        <p className="text-white/60 text-sm">
-          Manage games. Slot buttons turn green when booked.
-        </p>
-      </div>
+      
 
       {msg && <div className="mb-4 text-sm text-green-300">{msg}</div>}
 
@@ -215,9 +210,48 @@ export default function GamesClient() {
         </div>
 
         {/* right side placeholder */}
+        {/* Discount UI placeholder */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="font-semibold">Discount Value</div>
-          <div className="text-xs text-white/50 mt-1">UI only (optional)</div>
+        <div className="font-semibold">Discount Value</div>
+        <div className="text-xs text-white/50 mb-4">UI only (optional)</div>
+
+        <label className="text-xs text-white/60">Offer date</label>
+        <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="date"
+        />
+
+        <label className="text-xs text-white/60">Offer end date</label>
+        <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="date"
+        />
+
+        <label className="text-xs text-white/60">Discount %</label>
+        <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="number"
+            placeholder="ex: 10"
+        />
+
+        <label className="text-xs text-white/60">Discount start time</label>
+        <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="time"
+        />
+
+        <label className="text-xs text-white/60">Discount end time</label>
+        <input
+            className="mt-2 mb-4 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="time"
+        />
+
+        <button
+            onClick={() => setMsg("Discount UI saved (not stored in DB yet).")}
+            className="w-full rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500"
+        >
+            Save Discount
+        </button>
         </div>
       </div>
 
