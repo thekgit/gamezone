@@ -70,26 +70,22 @@ export default function GamesClient() {
     const n = Number(s);
     return Number.isFinite(n) && n > 0 ? n : 60;
   };
-
+  
   // ✅ Save new game
-  const onSaveGame = async () => {
-    setMsg("");
+  const timing_minutes =
+  String(timing).toLowerCase().includes("hour") ? 60 : Number(timing) || 60;
 
-    const duration_minutes = parseTimingToMinutes(timing);
-    const court_count = Number(courts || 1);
-    const priceNum = Number(price || 0);
-
-    const res = await fetch("/api/admin/games", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // ✅ IMPORTANT: API expects court_count (NOT courts)
-      body: JSON.stringify({
-        name: gameName,
-        duration_minutes,
-        court_count: Number.isFinite(court_count) ? court_count : 1,
-        price: Number.isFinite(priceNum) ? priceNum : 0,
-      }),
-    });
+  const res = await fetch("/api/admin/games", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    name: gameName,
+    duration_minutes: timing_minutes,
+    court_count: Number(courts || 1),      // table/court count
+    price_rupees: Number(price || 0),      // price in rupees
+    capacity_per_slot: 1,                  // required by DB
+   }),
+   });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return alert(data?.error || "Failed to save game");
