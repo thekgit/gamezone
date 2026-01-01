@@ -12,22 +12,43 @@ function slugify(input: string) {
 }
 
 export async function GET() {
-  try {
-    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const admin = supabaseAdmin();
-    const { data, error } = await admin
-      .from("games")
-      .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
-      .order("created_at", { ascending: false });
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ games: data || [] });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    try {
+      if (!assertAdmin()) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+  
+      const admin = supabaseAdmin();
+  
+      // 1) Fetch games
+      const { data: games, error: gErr } = await admin
+        .from("games")
+        .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
+        .order("created_at", { ascending: false });
+  
+      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
+  
+      // 2) Count ACTIVE sessions per game (occupancy)
+      const nowIso = new Date().toISOString();
+      const { data: sess, error: sErr } = await admin
+        .from("sessions")
+        .select("game_id")
+        .eq("status", "active")
+        .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+  
+      if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+  
+      const activeByGame: Record<string, number> = {};
+      for (const row of sess || []) {
+        const gid = (row as any).game_id as string | null;
+        if (!gid) continue;
+        activeByGame[gid] = (activeByGame[gid] || 0) + 1;
+      }
+  
+      return NextResponse.json({ games: games || [], activeByGame });
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    }
   }
-}
-
 export async function POST(req: Request) {
   try {
     if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
