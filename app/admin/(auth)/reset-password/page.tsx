@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -51,22 +50,12 @@ export default function AdminLoginPage() {
           />
         </div>
 
-        {/* ✅ Forgot password link */}
-        <div className="mt-3 flex justify-end">
-          <Link
-            href="/admin/forgot-password"
-            className="text-sm text-blue-400 hover:text-blue-300"
-          >
-            Forgot password?
-          </Link>
-        </div>
-
         {msg && <div className="mt-3 text-sm text-red-300">{msg}</div>}
 
         <button
           onClick={onLogin}
           disabled={!adminId || !password || loading}
-          className="w-full mt-4 rounded-xl py-3 font-semibold bg-white text-black disabled:opacity-40"
+          className="w-full mt-5 rounded-xl py-3 font-semibold bg-white text-black disabled:opacity-40"
         >
           {loading ? "Logging in..." : "Login"}
         </button>

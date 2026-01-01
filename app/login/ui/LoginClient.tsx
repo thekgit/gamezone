@@ -79,11 +79,19 @@ export default function LoginClient() {
         >
           {loading ? "Logging in..." : "Login"}
         </button>
-
+        <div className="mt-2 flex justify-end">
+            <a
+              href="/forgot-password"
+              className="text-sm text-blue-400 hover:text-blue-300"
+            >
+              Forgot password?
+            </a>
+          </div>
         <div className="mt-4 text-sm text-white/60">
           New here?{" "}
           <Link className="text-white underline" href="/signup">
             Create account
+        
           </Link>
         </div>
       </div>
