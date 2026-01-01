@@ -75,7 +75,7 @@ export async function POST(req: Request) {
         name,
         duration_minutes: Number.isFinite(duration_minutes) ? duration_minutes : 60,
         court_count: Number.isFinite(court_count) ? court_count : 1,
-        price: Number.isFinite(price) ? price : 0,
+        price_rupees: Number.isFinite(price) ? price : 0,
         is_active: true,
       })
       .select("id, key, name, duration_minutes, court_count, price, is_active, created_at")
@@ -116,10 +116,10 @@ export async function PATCH(req: Request) {
         name,
         duration_minutes: Number.isFinite(duration_minutes) ? duration_minutes : 60,
         court_count: Number.isFinite(court_count) ? court_count : 1,
-        price: Number.isFinite(price) ? price : 0,
+        price_rupees: Number.isFinite(price) ? price : 0,
       })
       .eq("id", id)
-      .select("id, key, name, duration_minutes, court_count, price, is_active, created_at")
+      .select("id, key, name, duration_minutes, court_count, price_rupees, is_active, created_at")
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
