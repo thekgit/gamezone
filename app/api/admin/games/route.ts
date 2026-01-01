@@ -4,30 +4,11 @@ import { assertAdmin } from "@/lib/assertAdmin";
 
 function slugify(input: string) {
   return input
-    .trim()
     .toLowerCase()
+    .trim()
     .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-async function makeUniqueKey(admin: ReturnType<typeof supabaseAdmin>, base: string) {
-  // Try base, then base-2, base-3, ...
-  let key = base || "game";
-  for (let i = 0; i < 50; i++) {
-    const candidate = i === 0 ? key : `${key}-${i + 1}`;
-
-    const { data, error } = await admin
-      .from("games")
-      .select("id")
-      .eq("key", candidate)
-      .maybeSingle();
-
-    if (error) throw new Error(error.message);
-    if (!data?.id) return candidate; // available
-  }
-  // last resort
-  return `${key}-${Date.now()}`;
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 export async function GET() {
@@ -37,7 +18,7 @@ export async function GET() {
     const admin = supabaseAdmin();
     const { data, error } = await admin
       .from("games")
-      .select("id, key, name, duration_minutes, court_count, price, is_active, created_at")
+      .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
       .order("created_at", { ascending: false });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -54,31 +35,31 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
 
     const name = String(body?.name || "").trim();
-
-    // accept both names (your UI sends timing_minutes / courts)
-    const duration_minutes = Number(body?.duration_minutes ?? body?.timing_minutes ?? 60);
-    const court_count = Number(body?.court_count ?? body?.courts ?? 1);
-    const price = Number(body?.price ?? 0);
-
     if (!name) return NextResponse.json({ error: "Game name required" }, { status: 400 });
 
-    const admin = supabaseAdmin();
+    const key = String(body?.key || slugify(name));
 
-    // ✅ generate required "key" column
-    const baseKey = slugify(name);
-    const key = await makeUniqueKey(admin, baseKey);
+    const duration_minutes = Number(body?.duration_minutes ?? 60);
+    const court_count = Number(body?.court_count ?? 1);
+
+    // ✅ REQUIRED NOT NULL columns
+    const capacity_per_slot = Number(body?.capacity_per_slot ?? 1);
+    const price_rupees = Number(body?.price_rupees ?? body?.price ?? 0);
+
+    const admin = supabaseAdmin();
 
     const { data, error } = await admin
       .from("games")
       .insert({
-        key, // ✅ FIX
+        key,
         name,
         duration_minutes: Number.isFinite(duration_minutes) ? duration_minutes : 60,
         court_count: Number.isFinite(court_count) ? court_count : 1,
-        price_rupees: Number.isFinite(price) ? price : 0,
+        capacity_per_slot: Number.isFinite(capacity_per_slot) ? capacity_per_slot : 1,
+        price_rupees: Number.isFinite(price_rupees) ? price_rupees : 0,
         is_active: true,
       })
-      .select("id, key, name, duration_minutes, court_count, price, is_active, created_at")
+      .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -94,32 +75,27 @@ export async function PATCH(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const id = String(body?.id || "").trim();
-
-    const name = String(body?.name || "").trim();
-    const duration_minutes = Number(body?.duration_minutes ?? body?.timing_minutes ?? 60);
-    const court_count = Number(body?.court_count ?? body?.courts ?? 1);
-    const price = Number(body?.price ?? 0);
-
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
-    if (!name) return NextResponse.json({ error: "Game name required" }, { status: 400 });
+
+    const updatePayload: any = {};
+
+    if (body?.name != null) updatePayload.name = String(body.name).trim();
+    if (!updatePayload.name) return NextResponse.json({ error: "Game name required" }, { status: 400 });
+
+    if (body?.duration_minutes != null) updatePayload.duration_minutes = Number(body.duration_minutes) || 60;
+    if (body?.court_count != null) updatePayload.court_count = Number(body.court_count) || 1;
+
+    // ✅ keep these valid if sent
+    if (body?.price_rupees != null) updatePayload.price_rupees = Number(body.price_rupees) || 0;
+    if (body?.capacity_per_slot != null) updatePayload.capacity_per_slot = Number(body.capacity_per_slot) || 1;
+    if (body?.key != null) updatePayload.key = String(body.key).trim();
 
     const admin = supabaseAdmin();
-
-    // ✅ if name changed, update key too (keeps legacy compatibility)
-    const baseKey = slugify(name);
-    const key = await makeUniqueKey(admin, baseKey);
-
     const { data, error } = await admin
       .from("games")
-      .update({
-        key,
-        name,
-        duration_minutes: Number.isFinite(duration_minutes) ? duration_minutes : 60,
-        court_count: Number.isFinite(court_count) ? court_count : 1,
-        price_rupees: Number.isFinite(price) ? price : 0,
-      })
+      .update(updatePayload)
       .eq("id", id)
-      .select("id, key, name, duration_minutes, court_count, price_rupees, is_active, created_at")
+      .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -138,8 +114,6 @@ export async function DELETE(req: Request) {
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
     const admin = supabaseAdmin();
-
-    // soft delete
     const { error } = await admin.from("games").update({ is_active: false }).eq("id", id);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
