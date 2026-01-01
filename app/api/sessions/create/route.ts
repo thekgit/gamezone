@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     const game_id_from_client = String(body?.game_id || "").trim();
 
     // ✅ Backward compatibility (old client)
-    const game_legacy = String(body?.game || "").trim(); // e.g. "pickleball" or maybe "Table Tennis"
+    const game_legacy = String(body?.game || "").trim(); // e.g. "pickleball" or "Table Tennis"
 
     const players = Number(body?.players ?? 1);
 
@@ -32,8 +32,17 @@ export async function POST(req: Request) {
     }
     const user_id = userRes.user.id;
 
-    // ✅ Resolve game row
-    let gameRow: any = null;
+    // ✅ Resolve game row ONCE
+    let gameRow:
+      | {
+          id: string;
+          name: string;
+          duration_minutes: number | null;
+          court_count: number | null;
+          price: number | null;
+          is_active: boolean | null;
+        }
+      | null = null;
 
     if (game_id_from_client) {
       const { data: g, error: gErr } = await admin
@@ -43,28 +52,28 @@ export async function POST(req: Request) {
         .maybeSingle();
 
       if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
-      gameRow = g;
+      gameRow = g as any;
     } else if (game_legacy) {
-      // Try by key first (if you still have it), else try by name
-      // This lets old frontend still work.
+      // Try key (if your schema has it), else name
       const { data: g1 } = await admin
         .from("games")
         .select("id, name, duration_minutes, court_count, price, is_active")
-        // @ts-ignore (key may exist in your schema; harmless if not used)
+        // @ts-ignore
         .eq("key", game_legacy)
         .maybeSingle();
 
       if (g1?.id) {
-        gameRow = g1;
+        gameRow = g1 as any;
       } else {
         const { data: g2, error: g2Err } = await admin
           .from("games")
           .select("id, name, duration_minutes, court_count, price, is_active")
-          .ilike("name", game_legacy) // name match
-          .maybeSingle();
+          .ilike("name", game_legacy); // exact-ish match (works if old client sends name)
 
         if (g2Err) return NextResponse.json({ error: g2Err.message }, { status: 500 });
-        gameRow = g2;
+
+        // if multiple returned, take first
+        gameRow = Array.isArray(g2) ? (g2[0] as any) : (g2 as any);
       }
     }
 
@@ -79,22 +88,20 @@ export async function POST(req: Request) {
     const game_id = gameRow.id;
 
     // ✅ Capacity check from DB (court_count)
-    const cap = Number(gameRow.court_count ?? 0);
-    if (cap > 0) {
-      const nowIso = new Date().toISOString();
+    const capacity = Number(gameRow.court_count ?? 1);
+    const nowIso = new Date().toISOString();
 
-      const { count, error: cErr } = await admin
-        .from("sessions")
-        .select("id", { count: "exact", head: true })
-        .eq("game_id", game_id)
-        .eq("status", "active")
-        .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+    const { count, error: cErr } = await admin
+      .from("sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("game_id", game_id)
+      .eq("status", "active")
+      .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
 
-      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
 
-      if ((count || 0) >= cap) {
-        return NextResponse.json({ error: "SLOT_FULL" }, { status: 400 });
-      }
+    if ((count || 0) >= capacity) {
+      return NextResponse.json({ error: "SLOT_FULL" }, { status: 400 });
     }
 
     // ✅ Session duration from DB (duration_minutes), fallback 60
@@ -105,7 +112,7 @@ export async function POST(req: Request) {
     const entry_token = token(12);
     const exit_token = token(12);
 
-    // ✅ pull visitor details from profiles (so admin panel shows name/phone/email)
+    // ✅ pull visitor details from profiles
     const { data: p } = await admin
       .from("profiles")
       .select("full_name, phone, email")
