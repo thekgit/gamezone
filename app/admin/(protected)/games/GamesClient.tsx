@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type GameRow = {
   id: string;
@@ -11,43 +11,37 @@ type GameRow = {
   capacity_per_slot: number;
   price_rupees: number;
   is_active: boolean;
-  created_at: string;
+  created_at?: string;
 };
 
-function minsToLabel(mins: number) {
-  if (!mins || mins <= 0) return "-";
-  if (mins % 60 === 0) return `${mins / 60} hour`;
-  return `${mins} mins`;
+function slotButtonClass(occupied: boolean) {
+  return (
+    "px-3 py-1 rounded-full text-xs font-semibold border select-none " +
+    (occupied
+      ? "bg-green-600 text-white border-green-500"
+      : "bg-white/10 text-white border-white/15")
+  );
 }
 
 export default function GamesClient() {
-  // --- Add New Game form state ---
-  const [gameName, setGameName] = useState("");
-  const [timing, setTiming] = useState("1 hour"); // accepts "1 hour" or minutes like "90"
-  const [courts, setCourts] = useState("2");
-  const [price, setPrice] = useState("");
-
-  // --- Discount form state (kept as-is) ---
-  const [offerDate, setOfferDate] = useState("");
-  const [offerEndDate, setOfferEndDate] = useState("");
-  const [discount, setDiscount] = useState("");
-  const [discountStartTime, setDiscountStartTime] = useState("");
-  const [discountEndTime, setDiscountEndTime] = useState("");
-
-  // --- List + edit state ---
-  const [games, setGames] = useState<GameRow[]>([]);
-  const [loadingGames, setLoadingGames] = useState(false);
   const [msg, setMsg] = useState("");
+  const [games, setGames] = useState<GameRow[]>([]);
+  const [activeByGame, setActiveByGame] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(false);
 
+  // form (add new game)
+  const [name, setName] = useState("");
+  const [duration, setDuration] = useState(60);
+  const [courts, setCourts] = useState(1);
+  const [price, setPrice] = useState(0);
+
+  // inline editing
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editMins, setEditMins] = useState("60");
-  const [editCourts, setEditCourts] = useState("1");
-  const [editPrice, setEditPrice] = useState("0");
+  const [editDraft, setEditDraft] = useState<Partial<GameRow>>({});
 
-  const loadGames = async () => {
+  const load = async () => {
     setMsg("");
-    setLoadingGames(true);
+    setLoading(true);
     try {
       const res = await fetch("/api/admin/games", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
@@ -55,304 +49,343 @@ export default function GamesClient() {
         setMsg(data?.error || "Failed to load games");
         return;
       }
-
-      const list: GameRow[] = (data?.games || []).filter(
-        (g: GameRow) => g.is_active !== false
-      );
-      setGames(list);
+      setGames((data.games || []) as GameRow[]);
+      setActiveByGame((data.activeByGame || {}) as Record<string, number>);
     } finally {
-      setLoadingGames(false);
+      setLoading(false);
     }
   };
 
+  // auto refresh so slot colors update when bookings happen
   useEffect(() => {
-    loadGames();
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
   }, []);
 
-  const parseTimingToMinutes = (val: string) => {
-    const s = String(val || "").trim().toLowerCase();
-    if (!s) return 60;
-
-    if (s.includes("hour")) {
-      const num = Number(s.replace(/[^0-9.]/g, "")) || 1;
-      return Math.max(1, Math.round(num * 60));
-    }
-
-    const n = Number(s);
-    return Number.isFinite(n) && n > 0 ? Math.round(n) : 60;
-  };
-
-  // ✅ Save new game
-  const onSaveGame = async () => {
-    const duration_minutes = parseTimingToMinutes(timing);
+  const createGame = async () => {
+    setMsg("");
 
     const res = await fetch("/api/admin/games", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: gameName,
-        duration_minutes,
+        name,
+        duration_minutes: Number(duration || 60),
         court_count: Number(courts || 1),
         price_rupees: Number(price || 0),
-        capacity_per_slot: 1,
+        capacity_per_slot: 1, // required by DB NOT NULL
       }),
     });
 
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return alert(data?.error || "Failed to save game");
+    if (!res.ok) {
+      setMsg(data?.error || "Failed to create");
+      return;
+    }
 
-    alert("Game saved ✅");
-    setGameName("");
-    setTiming("1 hour");
-    setCourts("2");
-    setPrice("");
-
-    await loadGames();
+    setName("");
+    setDuration(60);
+    setCourts(1);
+    setPrice(0);
+    await load();
+    setMsg("Game added.");
   };
 
-  // ✅ Save Discount (kept as-is)
-  const onSaveDiscount = async () => {
-    const res = await fetch("/api/admin/discounts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        offer_date: offerDate,
-        offer_end_date: offerEndDate,
-        discount_percent: Number(discount || 0),
-        start_time: discountStartTime,
-        end_time: discountEndTime,
-      }),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return alert(data?.error || "Failed to save discount");
-
-    alert("Discount saved ✅");
-    setOfferDate("");
-    setOfferEndDate("");
-    setDiscount("");
-    setDiscountStartTime("");
-    setDiscountEndTime("");
-  };
-
-  // ✅ Start editing
   const startEdit = (g: GameRow) => {
     setEditingId(g.id);
-    setEditName(g.name || "");
-    setEditMins(String(g.duration_minutes ?? 60));
-    setEditCourts(String(g.court_count ?? 1));
-    setEditPrice(String(g.price_rupees ?? 0));
+    setEditDraft({
+      id: g.id,
+      name: g.name,
+      duration_minutes: g.duration_minutes,
+      court_count: g.court_count,
+      price_rupees: g.price_rupees,
+      capacity_per_slot: g.capacity_per_slot,
+      is_active: g.is_active,
+      key: g.key,
+    });
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditName("");
-    setEditMins("60");
-    setEditCourts("1");
-    setEditPrice("0");
-  };
+  const saveEdit = async () => {
+    if (!editingId) return;
+    setMsg("");
 
-  // ✅ Update game
-  const saveEdit = async (id: string) => {
-    const res = await fetch("/api/admin/games", {
+    const res = await fetch(`/api/admin/games`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        id,
-        name: editName,
-        duration_minutes: Number(editMins || 60),
-        court_count: Number(editCourts || 1),
-        price_rupees: Number(editPrice || 0),
+        id: editingId,
+        name: String(editDraft.name || "").trim(),
+        duration_minutes: Number(editDraft.duration_minutes ?? 60),
+        court_count: Number(editDraft.court_count ?? 1),
+        price_rupees: Number(editDraft.price_rupees ?? 0),
+        capacity_per_slot: Number(editDraft.capacity_per_slot ?? 1),
       }),
     });
 
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return alert(data?.error || "Failed to update");
+    if (!res.ok) {
+      setMsg(data?.error || "Failed to update");
+      return;
+    }
 
-    cancelEdit();
-    await loadGames();
+    setEditingId(null);
+    setEditDraft({});
+    await load();
+    setMsg("Game updated.");
   };
 
-  // ✅ Delete game (soft delete)
-  const deleteGame = async (id: string) => {
-    if (!confirm("Delete this game? (It will be hidden from bookings)")) return;
-
-    const res = await fetch("/api/admin/games", {
+  const archiveGame = async (id: string) => {
+    setMsg("");
+    const res = await fetch(`/api/admin/games`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     });
 
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) return alert(data?.error || "Failed to delete");
-
-    await loadGames();
+    if (!res.ok) {
+      setMsg(data?.error || "Failed to delete");
+      return;
+    }
+    await load();
+    setMsg("Game archived (hidden from bookings).");
   };
 
+  const activeGames = useMemo(
+    () => games.filter((g) => g.is_active !== false),
+    [games]
+  );
+
   return (
-    <div className="mt-6 space-y-6">
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Add New Game */}
+    <div className="text-white">
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold">Games</h1>
+        <p className="text-white/60 text-sm">
+          Manage games. Slot buttons turn green when booked.
+        </p>
+      </div>
+
+      {msg && <div className="mb-4 text-sm text-green-300">{msg}</div>}
+
+      {/* Add game form */}
+      <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <h2 className="text-xl font-bold">Add New Game</h2>
+          <div className="font-semibold">Add New Game</div>
 
-          <div className="mt-5 space-y-3">
-            <div>
-              <label className="text-xs text-white/60">Game name</label>
-              <input
-                value={gameName}
-                onChange={(e) => setGameName(e.target.value)}
-                placeholder="ex: Cricket"
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
+          <label className="text-xs text-white/60">Game name</label>
+          <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            placeholder="ex: Cricket"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
 
-            <div>
-              <label className="text-xs text-white/60">Timing</label>
-              <input
-                value={timing}
-                onChange={(e) => setTiming(e.target.value)}
-                placeholder="ex: 1 hour (or 90)"
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
+          <label className="text-xs text-white/60">Timing (minutes)</label>
+          <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="number"
+            value={duration}
+            onChange={(e) => setDuration(Number(e.target.value))}
+          />
 
-            <div>
-              <label className="text-xs text-white/60">Table/Court count</label>
-              <input
-                value={courts}
-                onChange={(e) => setCourts(e.target.value)}
-                placeholder="ex: 3"
-                inputMode="numeric"
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
+          <label className="text-xs text-white/60">Table / Court count</label>
+          <input
+            className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="number"
+            value={courts}
+            onChange={(e) => setCourts(Number(e.target.value))}
+          />
 
-            <div>
-              <label className="text-xs text-white/60">Price (₹)</label>
-              <input
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="ex: 500"
-                inputMode="numeric"
-                className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-              />
-            </div>
+          <label className="text-xs text-white/60">Price (₹)</label>
+          <input
+            className="mt-2 mb-4 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            type="number"
+            value={price}
+            onChange={(e) => setPrice(Number(e.target.value))}
+          />
 
-            <button
-              onClick={onSaveGame}
-              className="mt-3 w-full rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500"
-            >
-              Save Game
-            </button>
-          </div>
+          <button
+            onClick={createGame}
+            disabled={!name.trim()}
+            className="w-full rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-40"
+          >
+            Save Game
+          </button>
         </div>
 
-        {/* Discount */}
+        {/* right side placeholder */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <h2 className="text-xl font-bold">Discount Value</h2>
-
-          <div className="mt-5 space-y-3">
-            <input type="date" value={offerDate} onChange={(e) => setOfferDate(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
-            <input type="date" value={offerEndDate} onChange={(e) => setOfferEndDate(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
-            <input value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="Discount %" className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
-            <input type="time" value={discountStartTime} onChange={(e) => setDiscountStartTime(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
-            <input type="time" value={discountEndTime} onChange={(e) => setDiscountEndTime(e.target.value)} className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3" />
-
-            <button
-              onClick={onSaveDiscount}
-              className="mt-3 w-full rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500"
-            >
-              Save Discount
-            </button>
-          </div>
+          <div className="font-semibold">Discount Value</div>
+          <div className="text-xs text-white/50 mt-1">UI only (optional)</div>
         </div>
       </div>
 
-      {/* Games list */}
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-xl font-bold">Games</h2>
+      {/* Games table */}
+      <div className="mt-6 rounded-2xl border border-white/10 bg-[#0b0b0b] overflow-hidden">
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <div className="font-semibold">Games List</div>
           <button
-            onClick={loadGames}
-            className="rounded-lg bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
+            onClick={load}
+            className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15"
           >
             Reload
           </button>
         </div>
 
-        {msg && <div className="mt-3 text-sm text-red-300">{msg}</div>}
-
-        <div className="mt-4 overflow-auto rounded-xl border border-white/10 bg-black/30">
+        <div className="overflow-auto">
           <table className="w-full text-sm">
             <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Name</th>
                 <th className="p-3 text-left">Timing</th>
-                <th className="p-3 text-left">Table/Court</th>
+                <th className="p-3 text-left">Tables/Courts</th>
                 <th className="p-3 text-left">Price</th>
+                <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-left">Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              {loadingGames ? (
-                <tr><td className="p-4 text-white/60" colSpan={5}>Loading…</td></tr>
-              ) : games.length === 0 ? (
-                <tr><td className="p-4 text-white/60" colSpan={5}>No games found.</td></tr>
-              ) : (
-                games.map((g) => {
-                  const isEditing = editingId === g.id;
-                  return (
-                    <tr key={g.id} className="border-t border-white/10">
-                      <td className="p-3">
-                        {isEditing ? (
-                          <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
-                        ) : (
-                          <span className="font-semibold">{g.name}</span>
-                        )}
-                      </td>
+              {activeGames.map((g) => {
+                const isEditing = editingId === g.id;
+                const active = activeByGame[g.id] || 0;
+                const total = Number(g.court_count || 0);
 
-                      <td className="p-3">
-                        {isEditing ? (
-                          <input value={editMins} onChange={(e) => setEditMins(e.target.value)} inputMode="numeric" className="w-32 rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
-                        ) : (
-                          minsToLabel(g.duration_minutes)
-                        )}
-                      </td>
+                return (
+                  <tr key={g.id} className="border-t border-white/10 hover:bg-white/5">
+                    <td className="p-3">
+                      {isEditing ? (
+                        <input
+                          className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none"
+                          value={String(editDraft.name ?? "")}
+                          onChange={(e) =>
+                            setEditDraft((d) => ({ ...d, name: e.target.value }))
+                          }
+                        />
+                      ) : (
+                        <span className="font-semibold">{g.name}</span>
+                      )}
+                    </td>
 
-                      <td className="p-3">
-                        {isEditing ? (
-                          <input value={editCourts} onChange={(e) => setEditCourts(e.target.value)} inputMode="numeric" className="w-24 rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
-                        ) : (
-                          g.court_count
-                        )}
-                      </td>
+                    <td className="p-3">
+                      {isEditing ? (
+                        <input
+                          className="w-28 rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none"
+                          type="number"
+                          value={Number(editDraft.duration_minutes ?? 60)}
+                          onChange={(e) =>
+                            setEditDraft((d) => ({
+                              ...d,
+                              duration_minutes: Number(e.target.value),
+                            }))
+                          }
+                        />
+                      ) : (
+                        `${g.duration_minutes} min`
+                      )}
+                    </td>
 
-                      <td className="p-3">
-                        {isEditing ? (
-                          <input value={editPrice} onChange={(e) => setEditPrice(e.target.value)} inputMode="numeric" className="w-28 rounded-lg bg-black/40 border border-white/10 px-3 py-2" />
-                        ) : (
-                          `₹${g.price_rupees}`
-                        )}
-                      </td>
+                    <td className="p-3">
+                      {isEditing ? (
+                        <input
+                          className="w-20 rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none"
+                          type="number"
+                          value={Number(editDraft.court_count ?? 1)}
+                          onChange={(e) =>
+                            setEditDraft((d) => ({
+                              ...d,
+                              court_count: Number(e.target.value),
+                            }))
+                          }
+                        />
+                      ) : (
+                        g.court_count
+                      )}
+                    </td>
 
-                      <td className="p-3">
-                        {isEditing ? (
-                          <div className="flex gap-2">
-                            <button onClick={() => saveEdit(g.id)} className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500">Save</button>
-                            <button onClick={cancelEdit} className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15">Cancel</button>
-                          </div>
-                        ) : (
-                          <div className="flex gap-2">
-                            <button onClick={() => startEdit(g)} className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15">Edit</button>
-                            <button onClick={() => deleteGame(g.id)} className="rounded-lg bg-red-600/80 px-3 py-2 font-semibold hover:bg-red-600">Delete</button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
+                    <td className="p-3">
+                      {isEditing ? (
+                        <input
+                          className="w-24 rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none"
+                          type="number"
+                          value={Number(editDraft.price_rupees ?? 0)}
+                          onChange={(e) =>
+                            setEditDraft((d) => ({
+                              ...d,
+                              price_rupees: Number(e.target.value),
+                            }))
+                          }
+                        />
+                      ) : (
+                        `₹${g.price_rupees}`
+                      )}
+                    </td>
+
+                    {/* Status slot buttons */}
+                    <td className="p-3">
+                      {total > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {Array.from({ length: total }).map((_, i) => {
+                            const occupied = i < active;
+                            return (
+                              <span key={i} className={slotButtonClass(occupied)}>
+                                Slot {i + 1}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-white/40">-</span>
+                      )}
+                    </td>
+
+                    <td className="p-3">
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={saveEdit}
+                            className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingId(null);
+                              setEditDraft({});
+                            }}
+                            className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startEdit(g)}
+                            className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => archiveGame(g.id)}
+                            className="rounded-lg bg-red-600/80 px-3 py-2 font-semibold hover:bg-red-600"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {activeGames.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-4 text-white/60">
+                    {loading ? "Loading..." : "No games found."}
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
