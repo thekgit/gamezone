@@ -42,7 +42,7 @@ export default async function ProtectedAdminLayout({
         </form>
       </aside>
 
-      <main className="flex-1 p-6 bg-[#111]">{children}</main>
+      <main className="flex-1 p-6 bg-[#111] overflow-y-auto">{children}</main>
     </div>
   );
 }
