@@ -15,7 +15,10 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
 
   const canSubmit = fullName.trim() && phone.trim() && email.trim();
-
+  if (!/^\d{10}$/.test(phone)) {
+    setMsg("Phone number must be exactly 10 digits.");
+    return;
+  }
   const handleSendLink = async () => {
     setMsg("");
     setLoading(true);
@@ -77,11 +80,16 @@ export default function SignupPage() {
             onChange={(e) => setFullName(e.target.value)}
           />
           <input
-            className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-            placeholder="Mobile number"
+            placeholder="Phone (10 digits)"
             inputMode="numeric"
+            maxLength={10}
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => {
+              // allow only digits
+              const val = e.target.value.replace(/\D/g, "");
+              setPhone(val);
+            }}
+            className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
           />
           <input
             className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
