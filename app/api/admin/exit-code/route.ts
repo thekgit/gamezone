@@ -1,7 +1,3 @@
-// ✅ FILE: app/api/admin/exit-code/route.ts
-// ✅ COPY-PASTE FULL FILE
-// ✅ ONE QR PER GROUP (uses group_id)
-
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
@@ -23,11 +19,11 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // resolve exit_token
+    // resolve exit_token by group_id (preferred) else by session_id
     let exit_token = "";
 
     if (group_id) {
-      const { data: s, error } = await admin
+      const { data: s } = await admin
         .from("sessions")
         .select("exit_token")
         .eq("group_id", group_id)
@@ -35,16 +31,9 @@ export async function POST(req: Request) {
         .limit(1)
         .maybeSingle();
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       exit_token = s?.exit_token || "";
     } else {
-      const { data: s, error } = await admin
-        .from("sessions")
-        .select("exit_token, group_id")
-        .eq("id", session_id)
-        .maybeSingle();
-
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      const { data: s } = await admin.from("sessions").select("exit_token").eq("id", session_id).maybeSingle();
       exit_token = s?.exit_token || "";
     }
 
@@ -53,7 +42,7 @@ export async function POST(req: Request) {
     const base = process.env.NEXT_PUBLIC_BASE_URL || "";
     const exit_url = `${base}/visitor?exit_token=${exit_token}`;
 
-    return NextResponse.json({ exit_url });
+    return NextResponse.json({ exit_url, exit_token });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

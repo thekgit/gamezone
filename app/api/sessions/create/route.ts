@@ -1,175 +1,86 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { assertAdmin } from "@/lib/assertAdmin";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Slot = {
-  session_id: string;
-  game_name: string | null;
-  slot_start: string | null;
-  slot_end: string | null;
-  status: string | null;
-};
-
-type GroupRow = {
-  id: string; // group_id
-  group_id: string;
-  created_at: string | null;
-
-  full_name: string | null;
-  phone: string | null;
-  email: string | null;
-
-  players: number | null;
-
-  // show latest game name in main column (optional)
-  game_name: string | null;
-
-  // one exit time for the whole group (QR scan time)
-  exit_time: string | null;
-
-  // active if latest session is active and not exited
-  status: string | null;
-
-  // all slots inside this group
-  slots: Slot[];
-};
-
-function pickMaxIso(a: string | null, b: string | null) {
-  if (!a) return b;
-  if (!b) return a;
-  return new Date(a).getTime() >= new Date(b).getTime() ? a : b;
+function addMinutes(d: Date, mins: number) {
+  return new Date(d.getTime() + mins * 60 * 1000);
 }
 
-export async function GET() {
+/**
+ * Expects body:
+ * {
+ *   user_id?: string,
+ *   game_id: string,
+ *   players: number,
+ *   visitor_name?: string,
+ *   visitor_phone?: string,
+ *   visitor_email?: string
+ * }
+ */
+export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const body = await req.json().catch(() => ({}));
+
+    const game_id = String(body?.game_id || "").trim();
+    const players = Number(body?.players ?? 1);
+
+    if (!game_id) return NextResponse.json({ error: "Missing game_id" }, { status: 400 });
+    if (!Number.isFinite(players) || players <= 0) {
+      return NextResponse.json({ error: "Invalid players" }, { status: 400 });
     }
 
     const admin = supabaseAdmin();
 
-    const { data, error } = await admin
-      .from("sessions")
-      .select(
-        `
-        id,
-        group_id,
-        created_at,
-        status,
-        players,
-        started_at,
-        ends_at,
-        start_time,
-        end_time,
-        ended_at,
-        visitor_name,
-        visitor_phone,
-        visitor_email,
-        exit_token,
-        games:game_id ( name )
-      `
-      )
-      .order("created_at", { ascending: false })
-      .limit(500);
+    // 1) load game duration
+    const { data: g, error: gErr } = await admin
+      .from("games")
+      .select("id,duration_minutes,is_active")
+      .eq("id", game_id)
+      .maybeSingle();
+
+    if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
+    if (!g?.id) return NextResponse.json({ error: "Game not found" }, { status: 404 });
+    if (g?.is_active === false) return NextResponse.json({ error: "Game inactive" }, { status: 400 });
+
+    const duration = Number(g.duration_minutes ?? 60);
+
+    // 2) create tokens + group_id (uuid)
+    const group_id = crypto.randomUUID(); // ✅ uuid
+    const exit_token = crypto.randomBytes(16).toString("hex"); // ✅ shared for group
+    const entry_token = crypto.randomBytes(12).toString("hex");
+
+    // 3) time window
+    const start = new Date();
+    const end = addMinutes(start, duration);
+
+    // 4) insert session
+    const payload = {
+      user_id: body?.user_id ?? null,
+      game_id,
+      players,
+      status: "active",
+
+      started_at: start.toISOString(),
+      ends_at: end.toISOString(),
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+
+      group_id,
+      exit_token,
+      entry_token,
+
+      visitor_name: body?.visitor_name ?? null,
+      visitor_phone: body?.visitor_phone ?? null,
+      visitor_email: body?.visitor_email ?? null,
+    };
+
+    const { data, error } = await admin.from("sessions").insert(payload).select("*").single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-    const groups = new Map<string, GroupRow>();
-
-    for (const s of (data || []) as any[]) {
-      const gid = (s.group_id || s.id) as string; // fallback for old rows
-      const slot_start = s.started_at ?? s.start_time ?? null;
-      const slot_end = s.ends_at ?? s.end_time ?? null;
-      const game_name = s?.games?.name ?? null;
-
-      const slot: Slot = {
-        session_id: s.id,
-        game_name,
-        slot_start,
-        slot_end,
-        status: s.status ?? null,
-      };
-
-      const existing = groups.get(gid);
-
-      if (!existing) {
-        groups.set(gid, {
-          id: gid,
-          group_id: gid,
-          created_at: s.created_at ?? null,
-
-          full_name: s.visitor_name ?? null,
-          phone: s.visitor_phone ?? null,
-          email: s.visitor_email ?? null,
-
-          players: typeof s.players === "number" ? s.players : s.players != null ? Number(s.players) : null,
-
-          game_name, // latest shown initially
-          exit_time: s.ended_at ?? null,
-          status: s.status ?? null,
-
-          slots: [slot],
-        });
-      } else {
-        // keep earliest created_at as group timestamp
-        if (existing.created_at && s.created_at) {
-          if (new Date(s.created_at).getTime() < new Date(existing.created_at).getTime()) {
-            existing.created_at = s.created_at;
-          }
-        } else if (!existing.created_at) {
-          existing.created_at = s.created_at ?? null;
-        }
-
-        // take max ended_at as group exit_time (QR scan time)
-        existing.exit_time = pickMaxIso(existing.exit_time, s.ended_at ?? null);
-
-        // keep players (if later row has value and earlier doesn't)
-        if (existing.players == null && s.players != null) {
-          existing.players = typeof s.players === "number" ? s.players : Number(s.players);
-        }
-
-        // push slot
-        existing.slots.push(slot);
-
-        // decide latest status + game_name based on newest created_at
-        // (since we iterating newest-first, first slot is newest; but we can still compute)
-        // easiest: set latest from the slot we see first (newest). So:
-        // if existing.status is null, set it; else keep.
-        // But to be safe, update when s.created_at is newer than current latest:
-        // We'll store latest by checking max time using a local compare:
-        const curLatest = existing.slots[0]; // because we add, we want newest first
-        // We'll just keep newest slot at index 0 by unshifting:
-        // Move logic: instead of push above, do unshift:
-      }
-    }
-
-    // Fix: we want slots in chronological order (oldest → newest) for display
-    const rows: GroupRow[] = Array.from(groups.values()).map((g) => {
-      g.slots.sort((a, b) => {
-        const ta = a.slot_start ? new Date(a.slot_start).getTime() : 0;
-        const tb = b.slot_start ? new Date(b.slot_start).getTime() : 0;
-        return ta - tb;
-      });
-
-      // latest slot determines "game_name" and "status"
-      const last = g.slots[g.slots.length - 1];
-      g.game_name = last?.game_name ?? g.game_name ?? null;
-      g.status = last?.status ?? g.status ?? null;
-
-      return g;
-    });
-
-    // sort groups by created_at desc (newest first)
-    rows.sort((a, b) => {
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return tb - ta;
-    });
-
-    return NextResponse.json({ rows });
+    return NextResponse.json({ session: data });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

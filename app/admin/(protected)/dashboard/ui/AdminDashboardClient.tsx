@@ -1,19 +1,16 @@
-// ✅ FILE: app/admin/(protected)/dashboard/ui/AdminDashboardClient.tsx
-// ✅ COPY-PASTE FULL FILE
-// ✅ Shows MULTIPLE slot ranges in ONE ROW + ONE QR PER GROUP
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 
-type Slot = { start: string | null; end: string | null };
+type SlotLine = { session_id: string; start: string | null; end: string | null; status: string | null };
 
 type Row = {
-  id: string; // group row id
-  group_id?: string | null;
+  id: string;
+  group_id: string | null;
 
   created_at: string | null;
+
   full_name: string | null;
   phone: string | null;
   email: string | null;
@@ -24,10 +21,13 @@ type Row = {
   slot_start: string | null;
   slot_end: string | null;
 
-  slots?: Slot[]; // ✅ new
-
   status: string | null;
+
+  // QR scan time
   exit_time: string | null;
+
+  // ✅ multi-slot history in same row UI
+  slots: SlotLine[];
 };
 
 type QrItem = {
@@ -65,7 +65,7 @@ export default function AdminDashboardClient() {
         setRows([]);
         return;
       }
-      setRows((data.rows || []) as Row[]);
+      setRows(Array.isArray(data?.rows) ? (data.rows as Row[]) : []);
     } catch {
       setMsg("Failed to load");
       setRows([]);
@@ -78,10 +78,13 @@ export default function AdminDashboardClient() {
     return () => clearInterval(id);
   }, []);
 
-  // completed only when QR scanned (exit_time exists)
+  // completed only when exit_time exists (QR scanned)
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
-    for (const r of rows) m.set(r.id, !!r.exit_time);
+    for (const r of rows) {
+      if (!r.group_id) continue;
+      m.set(r.group_id, !!r.exit_time);
+    }
     return m;
   }, [rows]);
 
@@ -90,16 +93,17 @@ export default function AdminDashboardClient() {
   }, [completedMap]);
 
   const genQr = async (r: Row) => {
-    const groupId = (r.group_id || r.id) as string;
+    const gid = r.group_id || "";
+    if (!gid) return;
 
     setMsg("");
-    setGenerating((g) => ({ ...g, [groupId]: true }));
+    setGenerating((g) => ({ ...g, [gid]: true }));
 
     try {
       const res = await fetch("/api/admin/exit-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ group_id: groupId }), // ✅ one QR per group
+        body: JSON.stringify({ group_id: gid }), // ✅ ONE QR per group
       });
 
       const data = await res.json().catch(() => ({}));
@@ -111,27 +115,17 @@ export default function AdminDashboardClient() {
       const exit_url: string = data.exit_url;
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
-      const slotLabel =
-        Array.isArray(r.slots) && r.slots.length
-          ? r.slots
-              .map((s) => `${t(s.start)}–${t(s.end)}`)
-              .join(" | ")
-          : r.slot_start
-          ? `${t(r.slot_start)}–${t(r.slot_end)}`
-          : "";
-
       const label = [
         r.full_name || "(No name)",
         r.email ? `• ${r.email}` : "",
         r.game_name ? `• ${r.game_name}` : "",
-        slotLabel ? `• ${slotLabel}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
       ]
         .filter(Boolean)
         .join(" ");
 
       const item: QrItem = {
-        group_id: groupId,
+        group_id: gid,
         label,
         dataUrl,
         exit_url,
@@ -139,11 +133,11 @@ export default function AdminDashboardClient() {
       };
 
       setQrs((prev) => {
-        const withoutThis = prev.filter((x) => x.group_id !== groupId);
+        const withoutThis = prev.filter((x) => x.group_id !== gid);
         return [item, ...withoutThis];
       });
     } finally {
-      setGenerating((g) => ({ ...g, [groupId]: false }));
+      setGenerating((g) => ({ ...g, [gid]: false }));
     }
   };
 
@@ -152,7 +146,7 @@ export default function AdminDashboardClient() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
-          <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
+          <p className="text-white/60 text-sm">Active sessions timeline + Generate ONE Exit QR per group.</p>
         </div>
       </div>
 
@@ -167,11 +161,9 @@ export default function AdminDashboardClient() {
               <div key={q.group_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
                 <div className="text-sm font-semibold">{q.label}</div>
                 <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
-
                 <div className="mt-3 flex justify-center">
                   <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
                 </div>
-
                 <div className="mt-2 text-xs text-white/40 break-all">Group: {q.group_id}</div>
               </div>
             ))}
@@ -198,7 +190,6 @@ export default function AdminDashboardClient() {
           <tbody>
             {rows.map((r) => {
               const completed = !!r.exit_time;
-              const groupId = (r.group_id || r.id) as string;
 
               return (
                 <tr key={r.id} className="border-t border-white/10 hover:bg-white/5 align-top">
@@ -209,18 +200,16 @@ export default function AdminDashboardClient() {
                   <td className="p-3">{r.game_name || "-"}</td>
                   <td className="p-3">{typeof r.players === "number" ? r.players : "-"}</td>
 
-                  {/* ✅ MULTI SLOTS IN SAME UI ROW */}
+                  {/* ✅ MULTI-LINE SLOTS */}
                   <td className="p-3">
-                    {Array.isArray(r.slots) && r.slots.length ? (
+                    {Array.isArray(r.slots) && r.slots.length > 0 ? (
                       <div className="space-y-1">
-                        {r.slots.map((s, i) => (
-                          <div key={i} className="text-white/90">
-                            {t(s.start)} – {t(s.end)}
+                        {r.slots.map((s, idx) => (
+                          <div key={s.session_id} className="text-xs text-white/80">
+                            {idx + 1}) {t(s.start)} – {t(s.end)}
                           </div>
                         ))}
                       </div>
-                    ) : r.slot_start ? (
-                      `${t(r.slot_start)} – ${t(r.slot_end)}`
                     ) : (
                       "-"
                     )}
@@ -234,10 +223,10 @@ export default function AdminDashboardClient() {
                     ) : (
                       <button
                         onClick={() => genQr(r)}
-                        disabled={!!generating[groupId]}
+                        disabled={!r.group_id || !!generating[r.group_id]}
                         className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        {generating[groupId] ? "Generating..." : "Generate QR"}
+                        {r.group_id && generating[r.group_id] ? "Generating..." : "Generate QR"}
                       </button>
                     )}
                   </td>
