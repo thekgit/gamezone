@@ -1,20 +1,9 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
-function baseUrlFromEnv(req: Request) {
-  // Prefer explicit env
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
-
-  // Fallback for Vercel
-  const vercel = process.env.VERCEL_URL;
-  if (vercel) return `https://${vercel}`;
-
-  // Last fallback (local)
-  const u = new URL(req.url);
-  return `${u.protocol}//${u.host}`;
-}
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function POST(req: Request) {
   try {
@@ -22,28 +11,61 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { session_id } = await req.json().catch(() => ({}));
-    if (!session_id) return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const group_id = String(body?.group_id || "").trim();
+    const session_id = String(body?.session_id || "").trim(); // backward compatible
+
+    if (!group_id && !session_id) {
+      return NextResponse.json({ error: "Missing group_id or session_id" }, { status: 400 });
+    }
 
     const admin = supabaseAdmin();
 
-    // ✅ Always generate a NEW token (so old QR becomes invalid)
-    const exit_token = crypto.randomBytes(24).toString("hex");
+    // ✅ resolve exit_token (shared across group)
+    let exit_token: string | null = null;
 
-    const { error: uErr } = await admin
-  .from("sessions")
-  .update({
-    exit_token, // ✅ ONLY this
-  })
-  .eq("id", session_id);
+    if (group_id) {
+      const { data, error } = await admin
+        .from("sessions")
+        .select("exit_token")
+        .eq("group_id", group_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
 
-    const base = baseUrlFromEnv(req);
-    const exit_url = `${base}/exit?token=${encodeURIComponent(exit_token)}`;
+      exit_token = data?.exit_token ?? null;
+    } else {
+      const { data, error } = await admin
+        .from("sessions")
+        .select("exit_token")
+        .eq("id", session_id)
+        .maybeSingle();
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      exit_token = data?.exit_token ?? null;
+    }
+
+    if (!exit_token) {
+      return NextResponse.json({ error: "Exit token missing" }, { status: 400 });
+    }
+
+    // ✅ QR URL hits visitor endpoint which ends ALL sessions with this exit_token
+    const exit_url = `${
+      process.env.NEXT_PUBLIC_BASE_URL || ""
+    }/visitor?exit_token=${exit_token}`;
 
     return NextResponse.json({ exit_url });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }

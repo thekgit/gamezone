@@ -1,96 +1,137 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function token(len = 16) {
-  return crypto.randomBytes(len).toString("hex");
+function addMinutes(d: Date, mins: number) {
+  return new Date(d.getTime() + mins * 60 * 1000);
 }
 
-/**
- * Rule:
- * If a session is still ACTIVE and its ends_at passed by > 5 minutes,
- * auto-close it and create a NEW session for same user/game/players.
- * Uses SAME group_id so UI can merge later.
- */
 export async function POST() {
   try {
-    // Keep admin-only, OR replace with a secret header check if you want cron public.
     if (!assertAdmin()) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
-
     const now = new Date();
-    const fiveMinAgoIso = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
 
-    // Find overdue active sessions
+    // sessions overdue by > 5 minutes past planned ends_at, still active, not ended_at
+    const thresholdIso = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+
     const { data: overdue, error } = await admin
       .from("sessions")
       .select(
-        "id, user_id, game_id, players, started_at, ends_at, status, group_id, visitor_name, visitor_phone, visitor_email"
+        "id,user_id,game_id,players,status,started_at,ends_at,ended_at,group_id,exit_token,visitor_name,visitor_phone,visitor_email"
       )
       .eq("status", "active")
+      .is("ended_at", null)
       .not("ends_at", "is", null)
-      .lt("ends_at", fiveMinAgoIso)
+      .lt("ends_at", thresholdIso)
       .limit(50);
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!overdue || overdue.length === 0) return NextResponse.json({ ok: true, updated: 0 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    let updated = 0;
+    // fetch durations for all involved games (1 query)
+    const gameIds = Array.from(
+      new Set((overdue || []).map((s: any) => s.game_id).filter(Boolean))
+    );
 
-    for (const s of overdue as any[]) {
-      // Load game duration (fallback 60)
-      const { data: g, error: gErr } = await admin
+    const durationByGame: Record<string, number> = {};
+    if (gameIds.length) {
+      const { data: games, error: gErr } = await admin
         .from("games")
-        .select("duration_minutes, is_active")
-        .eq("id", s.game_id)
-        .single();
+        .select("id,duration_minutes")
+        .in("id", gameIds);
 
-      if (gErr || !g || g.is_active === false) continue;
+      if (gErr) {
+        return NextResponse.json({ error: gErr.message }, { status: 500 });
+      }
 
-      const durMin = Number(g.duration_minutes ?? 60);
-      const startNew = new Date(s.ends_at); // new session starts exactly at previous end
-      const endNew = new Date(startNew.getTime() + durMin * 60 * 1000);
+      for (const g of games || []) {
+        durationByGame[g.id] = Number(g.duration_minutes ?? 60);
+      }
+    }
 
-      // 1) End old session (auto)
-      const { error: endErr } = await admin
+    let createdCount = 0;
+
+    for (const s of overdue || []) {
+      const endsAtIso = s.ends_at as string | null;
+      if (!endsAtIso) continue;
+
+      const endsAt = new Date(endsAtIso);
+
+      // ensure group_id exists (so the whole chain is linked)
+      const group_id = (s.group_id as string | null) || crypto.randomUUID();
+      if (!s.group_id) {
+        await admin.from("sessions").update({ group_id }).eq("id", s.id);
+      }
+
+      // prevent duplicate auto-extension:
+      // if a session already exists in same group starting at/after endsAt, skip
+      const { data: already, error: aErr } = await admin
         .from("sessions")
-        .update({ status: "ended" })
+        .select("id")
+        .eq("group_id", group_id)
+        .gte("started_at", endsAt.toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (aErr) continue;
+
+      if (already && already.length > 0) {
+        // still end the current one at planned end so it doesn't stay "active"
+        await admin
+          .from("sessions")
+          .update({ status: "ended", ended_at: endsAt.toISOString() })
+          .eq("id", s.id);
+        continue;
+      }
+
+      const duration = durationByGame[s.game_id] ?? 60;
+      const newStart = endsAt;
+      const newEnd = addMinutes(newStart, duration);
+
+      // end current session at its planned end
+      await admin
+        .from("sessions")
+        .update({ status: "ended", ended_at: endsAt.toISOString() })
         .eq("id", s.id);
 
-      if (endErr) continue;
-
-      // 2) Create new session same group_id
-      const group_id = s.group_id || crypto.randomUUID();
-
+      // create next active session (same group_id + same exit_token so QR is ONE for the group)
       const { error: insErr } = await admin.from("sessions").insert({
         user_id: s.user_id,
         game_id: s.game_id,
         players: s.players ?? 1,
+
         status: "active",
-        started_at: startNew.toISOString(),
-        ends_at: endNew.toISOString(),
-        start_time: startNew.toISOString(),
-        end_time: endNew.toISOString(),
-        entry_token: token(12),
-        exit_token: token(12),
+        started_at: newStart.toISOString(),
+        ends_at: newEnd.toISOString(),
+        start_time: newStart.toISOString(),
+        end_time: newEnd.toISOString(),
+
+        group_id,
+        exit_token: s.exit_token, // shared across group
+        entry_token: crypto.randomBytes(12).toString("hex"),
+
         visitor_name: s.visitor_name ?? null,
         visitor_phone: s.visitor_phone ?? null,
         visitor_email: s.visitor_email ?? null,
-        group_id,
       });
 
-      if (!insErr) updated += 1;
+      if (!insErr) createdCount += 1;
     }
 
-    return NextResponse.json({ ok: true, updated });
+    return NextResponse.json({ ok: true, createdCount });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }

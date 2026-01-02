@@ -30,19 +30,22 @@ export async function GET() {
       // ✅ occupancy count (active sessions per game)
       const nowIso = new Date().toISOString();
   
+      // ✅ occupancy count (active sessions per game)
+      // IMPORTANT: do NOT use ends_at for occupancy.
+      // slot is occupied until ended_at is set.
       const { data: sess, error: sErr } = await admin
-        .from("sessions")
-        .select("game_id")
-        .eq("status", "active")
-        .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
-  
+      .from("sessions")
+      .select("game_id")
+      .eq("status", "active")
+      .is("ended_at", null);
+
       if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
-  
+
       const activeByGame: Record<string, number> = {};
       for (const row of sess || []) {
-        const gid = (row as any).game_id as string | null;
-        if (!gid) continue;
-        activeByGame[gid] = (activeByGame[gid] || 0) + 1;
+      const gid = (row as any).game_id as string | null;
+      if (!gid) continue;
+      activeByGame[gid] = (activeByGame[gid] || 0) + 1;
       }
   
       return NextResponse.json({ games: games || [], activeByGame });

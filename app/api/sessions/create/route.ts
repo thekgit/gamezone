@@ -1,152 +1,113 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { assertAdmin } from "@/lib/assertAdmin";
 
-function token(len = 16) {
-  return crypto.randomBytes(len).toString("hex");
-}
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function POST(req: Request) {
+export async function GET() {
   try {
-    const body = await req.json().catch(() => ({}));
-
-    // ✅ NEW preferred input
-    const game_id_from_client = String(body?.game_id || "").trim();
-
-    // ✅ Backward compatibility (old client)
-    const game_legacy = String(body?.game || "").trim(); // e.g. "pickleball" or "Table Tennis"
-
-    const players = Number(body?.players ?? 1);
-
-    // ✅ Bearer token from client
-    const auth = req.headers.get("authorization") || "";
-    const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!jwt) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const admin = supabaseAdmin();
 
-    // ✅ resolve user_id
-    const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
-    if (userErr || !userRes?.user?.id) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-    const user_id = userRes.user.id;
+    const { data, error } = await admin
+      .from("sessions")
+      .select(
+        `
+        id,
+        group_id,
+        created_at,
+        status,
+        players,
+        started_at,
+        ends_at,
+        ended_at,
+        visitor_name,
+        visitor_phone,
+        visitor_email,
+        games:game_id ( name )
+      `
+      )
+      .order("created_at", { ascending: false })
+      .limit(500);
 
-    // ✅ Resolve game row ONCE
-    let gameRow:
-      | {
-          id: string;
-          name: string;
-          duration_minutes: number | null;
-          court_count: number | null;
-          price: number | null;
-          is_active: boolean | null;
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // ✅ group by group_id (fallback to id if null)
+    const map = new Map<string, any>();
+
+    for (const s of data || []) {
+      const gid = (s as any).group_id || (s as any).id;
+
+      if (!map.has(gid)) {
+        map.set(gid, {
+          group_id: gid,
+          created_at: (s as any).created_at,
+          full_name: (s as any).visitor_name ?? null,
+          phone: (s as any).visitor_phone ?? null,
+          email: (s as any).visitor_email ?? null,
+          players: (s as any).players ?? null,
+          segments: [],
+          hasActive: false,
+          latestEndedAt: null as string | null,
+        });
+      }
+
+      const g = map.get(gid);
+
+      g.segments.push({
+        session_id: (s as any).id,
+        game_name: (s as any)?.games?.name ?? null,
+        slot_start: (s as any).started_at ?? null,
+        slot_end: (s as any).ends_at ?? null,
+        ended_at: (s as any).ended_at ?? null,
+        status: (s as any).status ?? null,
+      });
+
+      if (((s as any).status || "").toLowerCase() === "active" && !(s as any).ended_at) {
+        g.hasActive = true;
+      }
+
+      const endedAt = (s as any).ended_at ?? null;
+      if (endedAt) {
+        if (!g.latestEndedAt || new Date(endedAt) > new Date(g.latestEndedAt)) {
+          g.latestEndedAt = endedAt;
         }
-      | null = null;
-
-    if (game_id_from_client) {
-      const { data: g, error: gErr } = await admin
-        .from("games")
-        .select("id, name, duration_minutes, court_count, price, is_active")
-        .eq("id", game_id_from_client)
-        .maybeSingle();
-
-      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
-      gameRow = g as any;
-    } else if (game_legacy) {
-      // Try key (if your schema has it), else name
-      const { data: g1 } = await admin
-        .from("games")
-        .select("id, name, duration_minutes, court_count, price, is_active")
-        // @ts-ignore
-        .eq("key", game_legacy)
-        .maybeSingle();
-
-      if (g1?.id) {
-        gameRow = g1 as any;
-      } else {
-        const { data: g2, error: g2Err } = await admin
-          .from("games")
-          .select("id, name, duration_minutes, court_count, price, is_active")
-          .ilike("name", game_legacy); // exact-ish match (works if old client sends name)
-
-        if (g2Err) return NextResponse.json({ error: g2Err.message }, { status: 500 });
-
-        // if multiple returned, take first
-        gameRow = Array.isArray(g2) ? (g2[0] as any) : (g2 as any);
       }
     }
 
-    if (!gameRow?.id) {
-      return NextResponse.json({ error: "Game not found" }, { status: 400 });
-    }
+    // sort segments by start time asc
+    const rows = Array.from(map.values()).map((r) => {
+      r.segments.sort((a: any, b: any) => {
+        const ta = a.slot_start ? new Date(a.slot_start).getTime() : 0;
+        const tb = b.slot_start ? new Date(b.slot_start).getTime() : 0;
+        return ta - tb;
+      });
 
-    if (gameRow.is_active === false) {
-      return NextResponse.json({ error: "Game is not active" }, { status: 400 });
-    }
+      // show game label
+      const firstGame = r.segments?.[0]?.game_name || null;
+      const extra = Math.max(0, r.segments.length - 1);
+      const game_name = extra > 0 ? `${firstGame} (+${extra})` : firstGame;
 
-    const game_id = gameRow.id;
-
-    // ✅ Capacity check from DB (court_count)
-    const capacity = Number(gameRow.court_count ?? 1);
-    const nowIso = new Date().toISOString();
-
-    const { count, error: cErr } = await admin
-      .from("sessions")
-      .select("id", { count: "exact", head: true })
-      .eq("game_id", game_id)
-      .eq("status", "active")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
-
-    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
-
-    if ((count || 0) >= capacity) {
-      return NextResponse.json({ error: "SLOT_FULL" }, { status: 400 });
-    }
-
-    // ✅ Session duration from DB (duration_minutes), fallback 60
-    const durationMinutes = Number(gameRow.duration_minutes ?? 60);
-    const started_at = new Date();
-    const ends_at = new Date(started_at.getTime() + durationMinutes * 60 * 1000);
-
-    const entry_token = token(12);
-    const exit_token = token(12);
-
-    // ✅ pull visitor details from profiles
-    const { data: p } = await admin
-      .from("profiles")
-      .select("full_name, phone, email")
-      .eq("user_id", user_id)
-      .maybeSingle();
-
-    const { data: created, error: insErr } = await admin
-      .from("sessions")
-      .insert({
-        user_id,
-        game_id,
-        players,
-        status: "active",
-        started_at: started_at.toISOString(),
-        ends_at: ends_at.toISOString(),
-        start_time: started_at.toISOString(),
-        end_time: ends_at.toISOString(),
-        entry_token,
-        exit_token,
-        visitor_name: p?.full_name ?? null,
-        visitor_phone: p?.phone ?? null,
-        visitor_email: p?.email ?? null,
-        group_id: crypto.randomUUID(),
-      })
-      .select("id")
-      .single();
-
-    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
-
-    return NextResponse.json({
-      ok: true,
-      message: "Slot has been created successfully",
-      session_id: created.id,
+      return {
+        group_id: r.group_id,
+        created_at: r.created_at,
+        full_name: r.full_name,
+        phone: r.phone,
+        email: r.email,
+        game_name,
+        players: r.players,
+        segments: r.segments,
+        exit_time: r.latestEndedAt,          // real scan time
+        status: r.hasActive ? "active" : "ended",
+      };
     });
+
+    // newest first by created_at
+    rows.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    return NextResponse.json({ rows });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
