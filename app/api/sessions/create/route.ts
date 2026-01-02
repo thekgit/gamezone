@@ -9,17 +9,6 @@ function addMinutes(d: Date, mins: number) {
   return new Date(d.getTime() + mins * 60 * 1000);
 }
 
-/**
- * Expects body:
- * {
- *   user_id?: string,
- *   game_id: string,
- *   players: number,
- *   visitor_name?: string,
- *   visitor_phone?: string,
- *   visitor_email?: string
- * }
- */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -34,7 +23,6 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // 1) load game duration
     const { data: g, error: gErr } = await admin
       .from("games")
       .select("id,duration_minutes,is_active")
@@ -47,16 +35,13 @@ export async function POST(req: Request) {
 
     const duration = Number(g.duration_minutes ?? 60);
 
-    // 2) create tokens + group_id (uuid)
-    const group_id = crypto.randomUUID(); // ✅ uuid
-    const exit_token = crypto.randomBytes(16).toString("hex"); // ✅ shared for group
+    const group_id = crypto.randomUUID();
+    const exit_token = crypto.randomBytes(16).toString("hex");
     const entry_token = crypto.randomBytes(12).toString("hex");
 
-    // 3) time window
     const start = new Date();
     const end = addMinutes(start, duration);
 
-    // 4) insert session
     const payload = {
       user_id: body?.user_id ?? null,
       game_id,
@@ -77,11 +62,19 @@ export async function POST(req: Request) {
       visitor_email: body?.visitor_email ?? null,
     };
 
-    const { data, error } = await admin.from("sessions").insert(payload).select("*").single();
+    const { data, error } = await admin
+      .from("sessions")
+      .insert(payload)
+      .select("*")
+      .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ session: data });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return NextResponse.json({ ok: true, route: "/api/sessions is alive" });
 }
