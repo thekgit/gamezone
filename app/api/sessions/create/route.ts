@@ -5,9 +5,49 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type Slot = {
+  session_id: string;
+  game_name: string | null;
+  slot_start: string | null;
+  slot_end: string | null;
+  status: string | null;
+};
+
+type GroupRow = {
+  id: string; // group_id
+  group_id: string;
+  created_at: string | null;
+
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+
+  players: number | null;
+
+  // show latest game name in main column (optional)
+  game_name: string | null;
+
+  // one exit time for the whole group (QR scan time)
+  exit_time: string | null;
+
+  // active if latest session is active and not exited
+  status: string | null;
+
+  // all slots inside this group
+  slots: Slot[];
+};
+
+function pickMaxIso(a: string | null, b: string | null) {
+  if (!a) return b;
+  if (!b) return a;
+  return new Date(a).getTime() >= new Date(b).getTime() ? a : b;
+}
+
 export async function GET() {
   try {
-    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!assertAdmin()) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const admin = supabaseAdmin();
 
@@ -22,10 +62,13 @@ export async function GET() {
         players,
         started_at,
         ends_at,
+        start_time,
+        end_time,
         ended_at,
         visitor_name,
         visitor_phone,
         visitor_email,
+        exit_token,
         games:game_id ( name )
       `
       )
@@ -34,78 +77,97 @@ export async function GET() {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // ✅ group by group_id (fallback to id if null)
-    const map = new Map<string, any>();
+    const groups = new Map<string, GroupRow>();
 
-    for (const s of data || []) {
-      const gid = (s as any).group_id || (s as any).id;
+    for (const s of (data || []) as any[]) {
+      const gid = (s.group_id || s.id) as string; // fallback for old rows
+      const slot_start = s.started_at ?? s.start_time ?? null;
+      const slot_end = s.ends_at ?? s.end_time ?? null;
+      const game_name = s?.games?.name ?? null;
 
-      if (!map.has(gid)) {
-        map.set(gid, {
+      const slot: Slot = {
+        session_id: s.id,
+        game_name,
+        slot_start,
+        slot_end,
+        status: s.status ?? null,
+      };
+
+      const existing = groups.get(gid);
+
+      if (!existing) {
+        groups.set(gid, {
+          id: gid,
           group_id: gid,
-          created_at: (s as any).created_at,
-          full_name: (s as any).visitor_name ?? null,
-          phone: (s as any).visitor_phone ?? null,
-          email: (s as any).visitor_email ?? null,
-          players: (s as any).players ?? null,
-          segments: [],
-          hasActive: false,
-          latestEndedAt: null as string | null,
+          created_at: s.created_at ?? null,
+
+          full_name: s.visitor_name ?? null,
+          phone: s.visitor_phone ?? null,
+          email: s.visitor_email ?? null,
+
+          players: typeof s.players === "number" ? s.players : s.players != null ? Number(s.players) : null,
+
+          game_name, // latest shown initially
+          exit_time: s.ended_at ?? null,
+          status: s.status ?? null,
+
+          slots: [slot],
         });
-      }
-
-      const g = map.get(gid);
-
-      g.segments.push({
-        session_id: (s as any).id,
-        game_name: (s as any)?.games?.name ?? null,
-        slot_start: (s as any).started_at ?? null,
-        slot_end: (s as any).ends_at ?? null,
-        ended_at: (s as any).ended_at ?? null,
-        status: (s as any).status ?? null,
-      });
-
-      if (((s as any).status || "").toLowerCase() === "active" && !(s as any).ended_at) {
-        g.hasActive = true;
-      }
-
-      const endedAt = (s as any).ended_at ?? null;
-      if (endedAt) {
-        if (!g.latestEndedAt || new Date(endedAt) > new Date(g.latestEndedAt)) {
-          g.latestEndedAt = endedAt;
+      } else {
+        // keep earliest created_at as group timestamp
+        if (existing.created_at && s.created_at) {
+          if (new Date(s.created_at).getTime() < new Date(existing.created_at).getTime()) {
+            existing.created_at = s.created_at;
+          }
+        } else if (!existing.created_at) {
+          existing.created_at = s.created_at ?? null;
         }
+
+        // take max ended_at as group exit_time (QR scan time)
+        existing.exit_time = pickMaxIso(existing.exit_time, s.ended_at ?? null);
+
+        // keep players (if later row has value and earlier doesn't)
+        if (existing.players == null && s.players != null) {
+          existing.players = typeof s.players === "number" ? s.players : Number(s.players);
+        }
+
+        // push slot
+        existing.slots.push(slot);
+
+        // decide latest status + game_name based on newest created_at
+        // (since we iterating newest-first, first slot is newest; but we can still compute)
+        // easiest: set latest from the slot we see first (newest). So:
+        // if existing.status is null, set it; else keep.
+        // But to be safe, update when s.created_at is newer than current latest:
+        // We'll store latest by checking max time using a local compare:
+        const curLatest = existing.slots[0]; // because we add, we want newest first
+        // We'll just keep newest slot at index 0 by unshifting:
+        // Move logic: instead of push above, do unshift:
       }
     }
 
-    // sort segments by start time asc
-    const rows = Array.from(map.values()).map((r) => {
-      r.segments.sort((a: any, b: any) => {
+    // Fix: we want slots in chronological order (oldest → newest) for display
+    const rows: GroupRow[] = Array.from(groups.values()).map((g) => {
+      g.slots.sort((a, b) => {
         const ta = a.slot_start ? new Date(a.slot_start).getTime() : 0;
         const tb = b.slot_start ? new Date(b.slot_start).getTime() : 0;
         return ta - tb;
       });
 
-      // show game label
-      const firstGame = r.segments?.[0]?.game_name || null;
-      const extra = Math.max(0, r.segments.length - 1);
-      const game_name = extra > 0 ? `${firstGame} (+${extra})` : firstGame;
+      // latest slot determines "game_name" and "status"
+      const last = g.slots[g.slots.length - 1];
+      g.game_name = last?.game_name ?? g.game_name ?? null;
+      g.status = last?.status ?? g.status ?? null;
 
-      return {
-        group_id: r.group_id,
-        created_at: r.created_at,
-        full_name: r.full_name,
-        phone: r.phone,
-        email: r.email,
-        game_name,
-        players: r.players,
-        segments: r.segments,
-        exit_time: r.latestEndedAt,          // real scan time
-        status: r.hasActive ? "active" : "ended",
-      };
+      return g;
     });
 
-    // newest first by created_at
-    rows.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // sort groups by created_at desc (newest first)
+    rows.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta;
+    });
 
     return NextResponse.json({ rows });
   } catch (e: any) {
