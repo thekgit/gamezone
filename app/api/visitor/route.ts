@@ -1,30 +1,59 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const exit_token = String(searchParams.get("exit_token") || "").trim();
+    const url = new URL(req.url);
+    const token = String(url.searchParams.get("token") || "").trim();
 
-    if (!exit_token) return NextResponse.json({ error: "Missing exit_token" }, { status: 400 });
+    if (!token) {
+      return new NextResponse("Missing token", { status: 400 });
+    }
 
-    const admin = supabaseAdmin();
-    const nowIso = new Date().toISOString();
-
-    // ✅ end ALL sessions that share this exit_token, but only those not yet QR-ended
-    const { error } = await admin
+    // Find session by exit_token
+    const { data: s, error: sErr } = await supabase
       .from("sessions")
-      .update({ ended_at: nowIso, status: "ended" })
-      .eq("exit_token", exit_token)
-      .is("ended_at", null);
+      .select("id, status, ended_at")
+      .eq("exit_token", token)
+      .single();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (sErr) return new NextResponse(sErr.message, { status: 500 });
+    if (!s) return new NextResponse("Invalid token", { status: 404 });
 
-    return NextResponse.json({ ok: true, ended_at: nowIso });
+    // If already ended, just show success
+    if (s.ended_at) {
+      return new NextResponse("Session already closed ✅", {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      });
+    }
+
+    // Mark ended
+    const now = new Date().toISOString();
+
+    const { error: uErr } = await supabase
+      .from("sessions")
+      .update({
+        status: "ended",
+        ended_at: now, // ✅ this exists in your DB
+      })
+      .eq("id", s.id);
+
+    if (uErr) return new NextResponse(uErr.message, { status: 500 });
+
+    return new NextResponse("Session closed ✅", {
+      status: 200,
+      headers: { "Content-Type": "text/plain" },
+    });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return new NextResponse(e?.message || "Server error", { status: 500 });
   }
 }

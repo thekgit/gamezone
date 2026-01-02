@@ -29,11 +29,18 @@ export default function GamesClient() {
   const [activeByGame, setActiveByGame] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
 
-  // form (add new game)
+  // Add game form
   const [name, setName] = useState("");
   const [duration, setDuration] = useState(60);
   const [courts, setCourts] = useState(1);
   const [price, setPrice] = useState(0);
+
+  // Discount UI (not persisted yet)
+  const [offerDate, setOfferDate] = useState("");
+  const [offerEndDate, setOfferEndDate] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [discountStartTime, setDiscountStartTime] = useState("");
+  const [discountEndTime, setDiscountEndTime] = useState("");
 
   // inline editing
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -56,16 +63,17 @@ export default function GamesClient() {
     }
   };
 
-  // auto refresh so slot colors update when bookings happen
+  // auto refresh so slot colors update
   useEffect(() => {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
 
+  const activeGames = useMemo(() => games.filter((g) => g.is_active !== false), [games]);
+
   const createGame = async () => {
     setMsg("");
-
     const res = await fetch("/api/admin/games", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,7 +82,7 @@ export default function GamesClient() {
         duration_minutes: Number(duration || 60),
         court_count: Number(courts || 1),
         price_rupees: Number(price || 0),
-        capacity_per_slot: 1, // required by DB NOT NULL
+        capacity_per_slot: 1, // ✅ required NOT NULL in your DB
       }),
     });
 
@@ -94,23 +102,14 @@ export default function GamesClient() {
 
   const startEdit = (g: GameRow) => {
     setEditingId(g.id);
-    setEditDraft({
-      id: g.id,
-      name: g.name,
-      duration_minutes: g.duration_minutes,
-      court_count: g.court_count,
-      price_rupees: g.price_rupees,
-      capacity_per_slot: g.capacity_per_slot,
-      is_active: g.is_active,
-      key: g.key,
-    });
+    setEditDraft({ ...g });
   };
 
   const saveEdit = async () => {
     if (!editingId) return;
     setMsg("");
 
-    const res = await fetch(`/api/admin/games`, {
+    const res = await fetch("/api/admin/games", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -136,8 +135,10 @@ export default function GamesClient() {
   };
 
   const archiveGame = async (id: string) => {
+    if (!confirm("Delete this game? (It will be hidden from bookings)")) return;
+
     setMsg("");
-    const res = await fetch(`/api/admin/games`, {
+    const res = await fetch("/api/admin/games", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
@@ -148,25 +149,21 @@ export default function GamesClient() {
       setMsg(data?.error || "Failed to delete");
       return;
     }
-    await load();
-    setMsg("Game archived (hidden from bookings).");
-  };
 
-  const activeGames = useMemo(
-    () => games.filter((g) => g.is_active !== false),
-    [games]
-  );
+    await load();
+    setMsg("Game archived.");
+  };
 
   return (
     <div className="text-white">
-      
-
       {msg && <div className="mb-4 text-sm text-green-300">{msg}</div>}
 
-      {/* Add game form */}
+      {/* TOP FORMS */}
       <div className="grid gap-4 lg:grid-cols-2">
+        {/* Add New Game */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="font-semibold">Add New Game</div>
+          <div className="text-xs text-white/50 mb-4">This is used in bookings.</div>
 
           <label className="text-xs text-white/60">Game name</label>
           <input
@@ -184,7 +181,7 @@ export default function GamesClient() {
             onChange={(e) => setDuration(Number(e.target.value))}
           />
 
-          <label className="text-xs text-white/60">Table / Court count</label>
+          <label className="text-xs text-white/60">Table / Court count (slots)</label>
           <input
             className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             type="number"
@@ -209,56 +206,70 @@ export default function GamesClient() {
           </button>
         </div>
 
-        {/* right side placeholder */}
-        {/* Discount UI placeholder */}
+        {/* Discount Section (UI only) */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-        <div className="font-semibold">Discount Value</div>
-        <div className="text-xs text-white/50 mb-4">UI only (optional)</div>
+          <div className="font-semibold">Discount Value</div>
+          <div className="text-xs text-white/50 mb-4">UI only right now.</div>
 
-        <label className="text-xs text-white/60">Offer date</label>
-        <input
+          <label className="text-xs text-white/60">Offer date</label>
+          <input
             className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             type="date"
-        />
+            value={offerDate}
+            onChange={(e) => setOfferDate(e.target.value)}
+          />
 
-        <label className="text-xs text-white/60">Offer end date</label>
-        <input
+          <label className="text-xs text-white/60">Offer end date</label>
+          <input
             className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             type="date"
-        />
+            value={offerEndDate}
+            onChange={(e) => setOfferEndDate(e.target.value)}
+          />
 
-        <label className="text-xs text-white/60">Discount %</label>
-        <input
+          <label className="text-xs text-white/60">Offer discount (%)</label>
+          <input
             className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             type="number"
             placeholder="ex: 10"
-        />
+            value={discount}
+            onChange={(e) => setDiscount(e.target.value)}
+          />
 
-        <label className="text-xs text-white/60">Discount start time</label>
-        <input
+          <label className="text-xs text-white/60">Discount start time</label>
+          <input
             className="mt-2 mb-3 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             type="time"
-        />
+            value={discountStartTime}
+            onChange={(e) => setDiscountStartTime(e.target.value)}
+          />
 
-        <label className="text-xs text-white/60">Discount end time</label>
-        <input
+          <label className="text-xs text-white/60">Discount end time</label>
+          <input
             className="mt-2 mb-4 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             type="time"
-        />
+            value={discountEndTime}
+            onChange={(e) => setDiscountEndTime(e.target.value)}
+          />
 
-        <button
-            onClick={() => setMsg("Discount UI saved (not stored in DB yet).")}
+          <button
+            onClick={() => setMsg("Discount UI saved locally (not stored yet).")}
             className="w-full rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500"
-        >
-            Save Discount
-        </button>
+          >
+            Save Discount (UI)
+          </button>
         </div>
       </div>
 
-      {/* Games table */}
+      {/* GAMES LIST */}
       <div className="mt-6 rounded-2xl border border-white/10 bg-[#0b0b0b] overflow-hidden">
         <div className="p-4 border-b border-white/10 flex items-center justify-between">
-          <div className="font-semibold">Games List</div>
+          <div>
+            <div className="font-semibold">Games</div>
+            <div className="text-xs text-white/50">
+              Status shows slot occupancy (green = booked).
+            </div>
+          </div>
           <button
             onClick={load}
             className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15"
@@ -273,7 +284,7 @@ export default function GamesClient() {
               <tr>
                 <th className="p-3 text-left">Name</th>
                 <th className="p-3 text-left">Timing</th>
-                <th className="p-3 text-left">Tables/Courts</th>
+                <th className="p-3 text-left">Table/Court</th>
                 <th className="p-3 text-left">Price</th>
                 <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-left">Actions</th>
@@ -293,9 +304,7 @@ export default function GamesClient() {
                         <input
                           className="w-full rounded-lg bg-black/40 border border-white/10 px-3 py-2 outline-none"
                           value={String(editDraft.name ?? "")}
-                          onChange={(e) =>
-                            setEditDraft((d) => ({ ...d, name: e.target.value }))
-                          }
+                          onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
                         />
                       ) : (
                         <span className="font-semibold">{g.name}</span>
@@ -309,10 +318,7 @@ export default function GamesClient() {
                           type="number"
                           value={Number(editDraft.duration_minutes ?? 60)}
                           onChange={(e) =>
-                            setEditDraft((d) => ({
-                              ...d,
-                              duration_minutes: Number(e.target.value),
-                            }))
+                            setEditDraft((d) => ({ ...d, duration_minutes: Number(e.target.value) }))
                           }
                         />
                       ) : (
@@ -327,10 +333,7 @@ export default function GamesClient() {
                           type="number"
                           value={Number(editDraft.court_count ?? 1)}
                           onChange={(e) =>
-                            setEditDraft((d) => ({
-                              ...d,
-                              court_count: Number(e.target.value),
-                            }))
+                            setEditDraft((d) => ({ ...d, court_count: Number(e.target.value) }))
                           }
                         />
                       ) : (
@@ -345,10 +348,7 @@ export default function GamesClient() {
                           type="number"
                           value={Number(editDraft.price_rupees ?? 0)}
                           onChange={(e) =>
-                            setEditDraft((d) => ({
-                              ...d,
-                              price_rupees: Number(e.target.value),
-                            }))
+                            setEditDraft((d) => ({ ...d, price_rupees: Number(e.target.value) }))
                           }
                         />
                       ) : (
@@ -356,7 +356,7 @@ export default function GamesClient() {
                       )}
                     </td>
 
-                    {/* Status slot buttons */}
+                    {/* ✅ SLOT BUTTONS */}
                     <td className="p-3">
                       {total > 0 ? (
                         <div className="flex flex-wrap gap-2">
