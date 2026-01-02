@@ -15,12 +15,16 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
 
   const canSubmit = fullName.trim() && phone.trim() && email.trim();
-  if (!/^\d{10}$/.test(phone)) {
-    setMsg("Phone number must be exactly 10 digits.");
-    return;
-  }
+
   const handleSendLink = async () => {
     setMsg("");
+
+    // ✅ phone validation (exactly 10 digits)
+    if (!/^\d{10}$/.test(phone)) {
+      setMsg("Phone number must be exactly 10 digits.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -65,7 +69,11 @@ export default function SignupPage() {
   return (
     <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
       <div className="w-full max-w-sm">
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
           <h1 className="text-3xl font-bold">Create account</h1>
           <p className="text-white/60 mt-2 text-sm">
             We’ll send you a one-time email link. Open it to set your password.
@@ -79,18 +87,20 @@ export default function SignupPage() {
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
           />
+
           <input
             placeholder="Phone (10 digits)"
             inputMode="numeric"
             maxLength={10}
             value={phone}
             onChange={(e) => {
-              // allow only digits
+              // ✅ keep digits only
               const val = e.target.value.replace(/\D/g, "");
               setPhone(val);
             }}
             className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
           />
+
           <input
             className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
             placeholder="Email"
