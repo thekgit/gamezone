@@ -12,6 +12,9 @@ type Row = {
   email: string | null;
 
   game_name: string | null;
+
+  players: number | null; // ✅ added
+
   slot_start: string | null;
   slot_end: string | null;
 
@@ -34,14 +37,16 @@ function dt(iso?: string | null) {
 
 function t(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function AdminDashboardClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
 
-  // multi QR storage
   const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
@@ -54,20 +59,18 @@ export default function AdminDashboardClient() {
         setMsg(data?.error || "Failed to load");
         return;
       }
-      setRows(data.rows || []);
+      setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
     }
   };
 
-  // auto-refresh every 5 seconds
   useEffect(() => {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
 
-  // map completed sessions
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
@@ -77,7 +80,6 @@ export default function AdminDashboardClient() {
     return m;
   }, [rows]);
 
-  // remove QR cards once session completes
   useEffect(() => {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
@@ -109,6 +111,7 @@ export default function AdminDashboardClient() {
         r.email ? `• ${r.email}` : "",
         r.game_name ? `• ${r.game_name}` : "",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
+        typeof r.players === "number" ? `• Players: ${r.players}` : "",
       ]
         .filter(Boolean)
         .join(" ");
@@ -121,7 +124,6 @@ export default function AdminDashboardClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      // keep multiple QRs; replace existing for same session
       setQrs((prev) => {
         const withoutThis = prev.filter((x) => x.session_id !== session_id);
         return [item, ...withoutThis];
@@ -131,23 +133,17 @@ export default function AdminDashboardClient() {
     }
   };
 
-  const clearAllQrs = () => setQrs([]);
-
   return (
     <div className="text-white">
-      {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
           <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
         </div>
-
-        
       </div>
 
       {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
 
-      {/* MULTI-QR BOARD */}
       {qrs.length > 0 && (
         <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="font-semibold mb-3">Active Exit QRs</div>
@@ -169,7 +165,6 @@ export default function AdminDashboardClient() {
         </div>
       )}
 
-      {/* TABLE */}
       <div className="mt-6 overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-white/70">
@@ -179,6 +174,7 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Phone</th>
               <th className="p-3 text-left">Email</th>
               <th className="p-3 text-left">Game</th>
+              <th className="p-3 text-left">Players</th>
               <th className="p-3 text-left">Slot</th>
               <th className="p-3 text-left">Exit Time</th>
               <th className="p-3 text-left">QR</th>
@@ -196,6 +192,7 @@ export default function AdminDashboardClient() {
                   <td className="p-3">{r.phone || "-"}</td>
                   <td className="p-3">{r.email || "-"}</td>
                   <td className="p-3">{r.game_name || "-"}</td>
+                  <td className="p-3">{typeof r.players === "number" ? r.players : "-"}</td>
                   <td className="p-3">
                     {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
                   </td>
@@ -220,7 +217,7 @@ export default function AdminDashboardClient() {
 
             {rows.length === 0 && (
               <tr>
-                <td className="p-4 text-white/60" colSpan={8}>
+                <td className="p-4 text-white/60" colSpan={9}>
                   No sessions found.
                 </td>
               </tr>

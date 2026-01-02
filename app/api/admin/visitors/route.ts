@@ -12,9 +12,7 @@ export async function GET() {
 
     const { data: sessions, error: sErr } = await admin
       .from("sessions")
-      .select(
-        "id, status, game_id, start_time, end_time, created_at, visitor_name, visitor_phone, visitor_email, ended_at"
-      )
+      .select("id, user_id, game_id, players, status, started_at, ends_at, visitor_name, visitor_phone, visitor_email, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
 

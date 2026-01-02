@@ -18,17 +18,23 @@ export default function ResetPasswordPage() {
   const updatePassword = async () => {
     setMsg("");
     setLoading(true);
-
+  
     const { error } = await supabase.auth.updateUser({ password });
-
+  
     if (error) {
       setMsg(error.message);
-    } else {
-      setMsg("Password updated successfully ✅");
-      setTimeout(() => router.push("/login"), 1500);
+      setLoading(false);
+      return;
     }
-
+  
+    // ✅ IMPORTANT: sign out so app doesn't auto-redirect to booking/select
+    await supabase.auth.signOut();
+  
+    setMsg("Password updated successfully ✅ Redirecting to login...");
     setLoading(false);
+  
+    // ✅ force go to login
+    router.replace("/login");
   };
 
   return (

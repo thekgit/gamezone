@@ -52,14 +52,7 @@ export default function AdminLoginPage() {
         </div>
 
         {/* ✅ Forgot password link */}
-        <div className="mt-3 flex justify-end">
-          <Link
-            href="/admin/forgot-password"
-            className="text-sm text-blue-400 hover:text-blue-300"
-          >
-            Forgot password?
-          </Link>
-        </div>
+        
 
         {msg && <div className="mt-3 text-sm text-red-300">{msg}</div>}
 

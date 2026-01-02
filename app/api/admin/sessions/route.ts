@@ -2,24 +2,8 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
-type SessionRow = {
-  id: string;
-  user_id: string;
-  created_at: string | null;
-
-  game_id: string | null;
-  slot_id: string | null;
-
-  start_time: string | null;
-  end_time: string | null;
-
-  status: string | null;
-  ended_at: string | null; // ✅ exit scan time
-
-  visitor_name: string | null;
-  visitor_phone: string | null;
-  visitor_email: string | null;
-};
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET() {
   try {
@@ -29,65 +13,51 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    const { data: sessions, error: sErr } = await admin
+    // sessions + games name (players INCLUDED)
+    const { data, error } = await admin
       .from("sessions")
       .select(
-        "id, user_id, created_at, game_id, slot_id, start_time, end_time, status, ended_at, visitor_name, visitor_phone, visitor_email"
+        `
+        id,
+        created_at,
+        status,
+        exit_time,
+        started_at,
+        ends_at,
+        players,
+        visitor_name,
+        visitor_phone,
+        visitor_email,
+        game_id,
+        games:games ( name )
+      `
       )
       .order("created_at", { ascending: false })
       .limit(200);
 
-    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const safe = (sessions || []) as SessionRow[];
-
-    // ✅ games lookup
-    const gameIds = Array.from(
-      new Set(
-        safe
-          .map((s) => s.game_id)
-          .filter((x): x is string => typeof x === "string" && x.length > 0)
-      )
-    );
-
-    let gameMap = new Map<string, string>();
-    if (gameIds.length) {
-      const { data: games, error: gErr } = await admin
-        .from("games")
-        .select("id, name")
-        .in("id", gameIds);
-
-      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
-
-      gameMap = new Map((games || []).map((g: any) => [g.id, g.name]));
-    }
-
-    const rows = safe.map((s) => ({
+    const rows = (data || []).map((s: any) => ({
       id: s.id,
       created_at: s.created_at,
 
-      // ✅ visitor info (what you want in table)
-      full_name: s.visitor_name,
-      phone: s.visitor_phone,
-      email: s.visitor_email,
+      full_name: s.visitor_name ?? null,
+      phone: s.visitor_phone ?? null,
+      email: s.visitor_email ?? null,
 
-      // ✅ game
-      game_name: s.game_id ? gameMap.get(s.game_id) || "Unknown" : "Unknown",
+      game_name: s.games?.name ?? null,
 
-      // ✅ slot (fixed 1 hour window)
-      slot_start: s.start_time,
-      slot_end: s.end_time,
+      players: typeof s.players === "number" ? s.players : null,
 
-      // ✅ IMPORTANT for UI rules
-      status: s.status,
-      exit_time: s.ended_at, // ✅ this is the scan time
+      slot_start: s.started_at ?? null,
+      slot_end: s.ends_at ?? null,
+
+      status: s.status ?? null,
+      exit_time: s.exit_time ?? null,
     }));
 
     return NextResponse.json({ rows });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }

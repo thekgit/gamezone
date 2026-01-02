@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
-
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 function slugify(input: string) {
   return input
     .toLowerCase()
@@ -19,16 +20,16 @@ export async function GET() {
   
       const admin = supabaseAdmin();
   
-      // 1) Fetch games
-      const { data: games, error: gErr } = await admin
+      const { data: games, error } = await admin
         .from("games")
         .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
         .order("created_at", { ascending: false });
   
-      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   
-      // 2) Count ACTIVE sessions per game (occupancy)
+      // ✅ occupancy count (active sessions per game)
       const nowIso = new Date().toISOString();
+  
       const { data: sess, error: sErr } = await admin
         .from("sessions")
         .select("game_id")

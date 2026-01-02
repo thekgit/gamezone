@@ -135,6 +135,7 @@ export async function POST(req: Request) {
         visitor_name: p?.full_name ?? null,
         visitor_phone: p?.phone ?? null,
         visitor_email: p?.email ?? null,
+        group_id: crypto.randomUUID(),
       })
       .select("id")
       .single();
