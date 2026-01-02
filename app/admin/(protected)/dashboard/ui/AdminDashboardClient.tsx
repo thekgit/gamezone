@@ -17,7 +17,7 @@ type Row = {
 
   slot_start: string | null;
   slot_end: string | null;
-
+  players: number | null;
   status: string | null;
   exit_time: string | null;
 };

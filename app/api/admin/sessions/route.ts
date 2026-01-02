@@ -13,7 +13,8 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    // sessions + games name (players INCLUDED)
+    // ✅ IMPORTANT: DO NOT SELECT exit_time (it doesn't exist)
+    // We will use ends_at as exit_time in response.
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -21,15 +22,15 @@ export async function GET() {
         id,
         created_at,
         status,
-        exit_time,
+        players,
         started_at,
         ends_at,
-        players,
+        start_time,
+        end_time,
         visitor_name,
         visitor_phone,
         visitor_email,
-        game_id,
-        games:games ( name )
+        games:game_id ( name )
       `
       )
       .order("created_at", { ascending: false })
@@ -37,24 +38,27 @@ export async function GET() {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const rows = (data || []).map((s: any) => ({
-      id: s.id,
-      created_at: s.created_at,
+    const rows =
+      (data || []).map((s: any) => ({
+        id: s.id,
+        created_at: s.created_at,
 
-      full_name: s.visitor_name ?? null,
-      phone: s.visitor_phone ?? null,
-      email: s.visitor_email ?? null,
+        full_name: s.visitor_name ?? null,
+        phone: s.visitor_phone ?? null,
+        email: s.visitor_email ?? null,
 
-      game_name: s.games?.name ?? null,
+        game_name: s?.games?.name ?? null,
 
-      players: typeof s.players === "number" ? s.players : null,
+        // ✅ slot start/end (keep both compatibility fields)
+        slot_start: s.started_at ?? s.start_time ?? null,
+        slot_end: s.ends_at ?? s.end_time ?? null,
 
-      slot_start: s.started_at ?? null,
-      slot_end: s.ends_at ?? null,
+        // ✅ THIS is what your UI expects:
+        exit_time: s.ends_at ?? s.end_time ?? null,
 
-      status: s.status ?? null,
-      exit_time: s.exit_time ?? null,
-    }));
+        status: s.status ?? null,
+        players: s.players ?? null,
+      })) ?? [];
 
     return NextResponse.json({ rows });
   } catch (e: any) {
