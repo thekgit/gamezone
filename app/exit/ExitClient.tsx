@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+import { useSearchParams, useRouter } from "next/navigation";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,112 +13,65 @@ export default function ExitClient() {
   const sp = useSearchParams();
   const router = useRouter();
 
+  const session_id = sp.get("session_id") || "";
   const token = sp.get("token") || "";
 
-  const [status, setStatus] = useState<"idle" | "working" | "done" | "error">("idle");
-  const [msg, setMsg] = useState("");
-  const [minutes, setMinutes] = useState<number | null>(null);
+  const [msg, setMsg] = useState("Ending session...");
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const run = async () => {
-      if (!token) {
-        setStatus("error");
-        setMsg("Invalid QR (missing info).");
+    (async () => {
+      setError("");
+
+      if (!session_id || !token) {
+        setError("Invalid QR (missing session_id/token)");
         return;
       }
 
-      setStatus("working");
-      setMsg("");
-
-      // ✅ ensure user is logged in
+      // must be logged in (only owner can end)
       const { data } = await supabase.auth.getSession();
-      const access = data.session?.access_token;
+      const jwt = data?.session?.access_token;
 
-      if (!access) {
-        // send to login, then come back here and auto-end
-        router.replace(`/login?next=${encodeURIComponent(`/exit?token=${token}`)}`);
+      if (!jwt) {
+        // send user to login, then come back to this exit url
+        const next = encodeURIComponent(`/exit?session_id=${session_id}&token=${token}`);
+        router.replace(`/login?next=${next}`);
         return;
       }
 
-      // ✅ end session
       const res = await fetch("/api/exit/consume", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${access}`,
+          Authorization: `Bearer ${jwt}`,
         },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ session_id, token }),
       });
 
       const out = await res.json().catch(() => ({}));
-
       if (!res.ok) {
-        setStatus("error");
-        setMsg(out?.error || "Invalid/expired QR.");
+        setError(out?.error || "Failed to end session");
         return;
       }
 
-      setMinutes(out?.durationMinutes ?? null);
-      setStatus("done");
-    };
+      setMsg(out?.alreadyEnded ? "Session already ended ✅" : "Session ended ✅");
+    })();
+  }, [session_id, token, router]);
 
-    run();
-  }, [token, router]);
+  return (
+    <div className="min-h-screen bg-black text-white flex items-center justify-center px-4">
+      <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-6">
+        <h1 className="text-2xl font-bold">Exit</h1>
+        <p className="text-white/60 text-sm mt-2">
+          Scan QR to end your session.
+        </p>
 
-  if (status === "working") {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center px-6 text-center">
-        <div className="max-w-sm w-full rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="text-2xl font-bold">Exit</div>
-          <div className="mt-2 text-white/60">Ending your session…</div>
-        </div>
+        {error ? (
+          <div className="mt-4 text-red-300 text-sm">{error}</div>
+        ) : (
+          <div className="mt-4 text-green-300 text-sm">{msg}</div>
+        )}
       </div>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center px-6 text-center">
-        <div className="max-w-sm w-full rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="text-2xl font-bold">Exit</div>
-          <div className="mt-2 text-red-300">{msg || "Invalid/expired QR."}</div>
-          <button
-            onClick={() => router.replace("/select")}
-            className="mt-5 w-full rounded-xl py-3 font-semibold bg-white text-black"
-          >
-            Go to Home
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "done") {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center px-6 text-center">
-        <div className="max-w-sm w-full rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="text-2xl font-bold">Thanks for visiting 🎉</div>
-          <div className="mt-2 text-white/70">
-            Your session has ended successfully.
-          </div>
-
-          {minutes != null && (
-            <div className="mt-4 text-white/80">
-              Total time played: <span className="font-semibold">{minutes} min</span>
-            </div>
-          )}
-
-          <button
-            onClick={() => router.replace("/select")}
-            className="mt-6 w-full rounded-xl py-3 font-semibold bg-white text-black"
-          >
-            Back to Booking
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // idle fallback
-  return null;
+    </div>
+  );
 }

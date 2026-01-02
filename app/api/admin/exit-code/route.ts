@@ -1,20 +1,24 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function getOrigin(req: Request) {
-  const url = new URL(req.url);
-  return url.origin;
+function token(len = 12) {
+  return crypto.randomBytes(len).toString("hex");
+}
+
+function getBaseUrl(req: Request) {
+  const proto = req.headers.get("x-forwarded-proto") || "http";
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+  return `${proto}://${host}`;
 }
 
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();
@@ -22,32 +26,26 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // Ensure session exists + has exit_token
-    const { data: s, error: sErr } = await admin
+    // rotate token every time
+    const newExitToken = token(12);
+
+    const { data: s, error: upErr } = await admin
       .from("sessions")
-      .select("id, status, exit_token")
+      .update({ exit_token: newExitToken })
       .eq("id", session_id)
+      .select("id, exit_token")
       .single();
 
-    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
-    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
 
-    let exit_token = s.exit_token as string | null;
+    const base = getBaseUrl(req);
 
-    if (!exit_token) {
-      exit_token = crypto.randomUUID().replace(/-/g, "");
-      const { error: uErr } = await admin
-        .from("sessions")
-        .update({ exit_token })
-        .eq("id", session_id);
-      if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
-    }
+    // QR opens exit page with sid + token
+    const exit_url = `${base}/exit?session_id=${encodeURIComponent(s.id)}&token=${encodeURIComponent(
+      s.exit_token
+    )}`;
 
-    // QR should open THIS route:
-    const origin = getOrigin(req);
-    const exit_url = `${origin}/api/visitor/exit?token=${exit_token}`;
-
-    return NextResponse.json({ exit_url });
+    return NextResponse.json({ ok: true, exit_url });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
