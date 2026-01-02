@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+// Keep this route compatible if anything still calls it.
 export async function GET() {
   try {
     if (!assertAdmin()) {
@@ -10,48 +14,42 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    const { data: sessions, error: sErr } = await admin
+    const { data, error } = await admin
       .from("sessions")
-      .select("id, user_id, game_id, players, status, started_at, ends_at, visitor_name, visitor_phone, visitor_email, created_at")
+      .select(
+        `
+        id,
+        created_at,
+        status,
+        players,
+        started_at,
+        ended_at,
+        ends_at,
+        start_time,
+        end_time,
+        visitor_name,
+        visitor_phone,
+        visitor_email,
+        games:game_id ( name )
+      `
+      )
       .order("created_at", { ascending: false })
       .limit(200);
 
-    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const safeSessions = sessions || [];
-
-    // Collect game ids safely
-    const gameIds = Array.from(
-      new Set(
-        safeSessions
-          .map((s: any) => s.game_id)
-          .filter((id: any): id is string => typeof id === "string" && id.length > 0)
-      )
-    );
-
-    let gameMap = new Map<string, string>();
-    if (gameIds.length > 0) {
-      const { data: games, error: gErr } = await admin
-        .from("games")
-        .select("id, name")
-        .in("id", gameIds);
-
-      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
-
-      gameMap = new Map((games || []).map((g: any) => [g.id, g.name]));
-    }
-
-    const rows = safeSessions.map((s: any) => ({
+    const rows = (data || []).map((s: any) => ({
       id: s.id,
-      status: s.status,                 // ✅ needed to disable button
-      timestamp: s.created_at,
-      name: s.visitor_name || "",
-      phone: s.visitor_phone || "",
-      email: s.visitor_email || "",
-      game: gameMap.get(s.game_id) || "Unknown",
-      start_time: s.start_time,
-      end_time: s.end_time,             // ✅ keeps 1-hour slot fixed
-      exit_time: s.ended_at ?? s.ends_at ?? s.end_time ?? null,           // ✅ exact QR scan time
+      created_at: s.created_at,
+      full_name: s.visitor_name ?? null,
+      phone: s.visitor_phone ?? null,
+      email: s.visitor_email ?? null,
+      game_name: s?.games?.name ?? null,
+      slot_start: s.started_at ?? s.start_time ?? null,
+      slot_end: s.ends_at ?? s.end_time ?? null,
+      exit_time: s.ended_at ?? null,
+      status: s.status ?? null,
+      players: s.players ?? null,
     }));
 
     return NextResponse.json({ rows });

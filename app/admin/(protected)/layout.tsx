@@ -18,7 +18,7 @@ export default async function ProtectedAdminLayout({
         <h2 className="text-lg font-bold">Admin</h2>
         <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
 
-        {/* ✅ Tabs with active highlight */}
+        {/* ✅ Blue active highlight handled inside SidebarNav */}
         <SidebarNav />
 
         <form action="/api/admin/logout" method="post">

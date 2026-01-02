@@ -1,6 +1,3 @@
-// ✅ FILE: app/api/admin/games/route.ts
-// ✅ COPY-PASTE FULL FILE
-
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
@@ -14,15 +11,12 @@ function slugify(input: string) {
     .trim()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
     .replace(/^_+|_+$/g, "");
 }
 
 export async function GET() {
   try {
-    if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const admin = supabaseAdmin();
 
@@ -33,12 +27,14 @@ export async function GET() {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // ✅ IMPORTANT FIX:
-    // Keep slot green until QR is scanned (ended_at is set).
+    // ✅ occupancy count (active sessions per game)
+    const nowIso = new Date().toISOString();
+
     const { data: sess, error: sErr } = await admin
       .from("sessions")
       .select("game_id")
-      .is("ended_at", null); // ✅ not ended by QR yet
+      .eq("status", "active")
+      .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
 
     if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
 
@@ -69,6 +65,7 @@ export async function POST(req: Request) {
     const duration_minutes = Number(body?.duration_minutes ?? 60);
     const court_count = Number(body?.court_count ?? 1);
 
+    // ✅ REQUIRED NOT NULL columns in your DB
     const capacity_per_slot = Number(body?.capacity_per_slot ?? 1);
     const price_rupees = Number(body?.price_rupees ?? body?.price ?? 0);
 
