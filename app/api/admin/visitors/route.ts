@@ -51,7 +51,7 @@ export async function GET() {
       game: gameMap.get(s.game_id) || "Unknown",
       start_time: s.start_time,
       end_time: s.end_time,             // ✅ keeps 1-hour slot fixed
-      exit_time: s.ended_at,            // ✅ exact QR scan time
+      exit_time: s.ended_at ?? s.ends_at ?? s.end_time ?? null,           // ✅ exact QR scan time
     }));
 
     return NextResponse.json({ rows });

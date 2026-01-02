@@ -13,8 +13,6 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    // ✅ IMPORTANT: DO NOT SELECT exit_time (it doesn't exist)
-    // We will use ends_at as exit_time in response.
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -24,6 +22,7 @@ export async function GET() {
         status,
         players,
         started_at,
+        ended_at,
         ends_at,
         start_time,
         end_time,
@@ -38,27 +37,25 @@ export async function GET() {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const rows =
-      (data || []).map((s: any) => ({
-        id: s.id,
-        created_at: s.created_at,
+    const rows = (data || []).map((s: any) => ({
+      id: s.id,
+      created_at: s.created_at,
 
-        full_name: s.visitor_name ?? null,
-        phone: s.visitor_phone ?? null,
-        email: s.visitor_email ?? null,
+      full_name: s.visitor_name ?? null,
+      phone: s.visitor_phone ?? null,
+      email: s.visitor_email ?? null,
 
-        game_name: s?.games?.name ?? null,
+      game_name: s?.games?.name ?? null,
 
-        // ✅ slot start/end (keep both compatibility fields)
-        slot_start: s.started_at ?? s.start_time ?? null,
-        slot_end: s.ends_at ?? s.end_time ?? null,
+      slot_start: s.started_at ?? s.start_time ?? null,
+      slot_end: s.ends_at ?? s.end_time ?? null,
 
-        // ✅ THIS is what your UI expects:
-        exit_time: s.ends_at ?? s.end_time ?? null,
+      // ✅ real exit time = QR scan time if available
+      exit_time: s.ended_at ?? null,
 
-        status: s.status ?? null,
-        players: s.players ?? null,
-      })) ?? [];
+      status: s.status ?? null,
+      players: s.players ?? null,
+    }));
 
     return NextResponse.json({ rows });
   } catch (e: any) {

@@ -13,11 +13,11 @@ type Row = {
 
   game_name: string | null;
 
-  players: number | null; // ✅ added
+  players: number | null;  // ✅ keep this ONCE
 
   slot_start: string | null;
   slot_end: string | null;
-  players: number | null;
+
   status: string | null;
   exit_time: string | null;
 };
