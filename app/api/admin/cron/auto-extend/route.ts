@@ -1,3 +1,6 @@
+// ✅ FILE: app/api/admin/cron/auto-extend/route.ts
+// ✅ COPY-PASTE FULL FILE (extends repeatedly forever until QR scanned)
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import crypto from "crypto";
@@ -11,7 +14,7 @@ function addMinutes(d: Date, mins: number) {
 
 export async function POST(req: Request) {
   try {
-    // ✅ protect by secret header (cron friendly)
+    // ✅ cron protection (NO admin session needed)
     const secret = req.headers.get("x-cron-secret") || "";
     if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -19,41 +22,31 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
     const now = new Date();
-    const nowMinus5Iso = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
 
-    // find overdue active sessions: ends_at < now-5min, not QR-exited yet
+    // overdue = ends_at < now - 5 mins AND not QR ended
+    const fiveMinsAgoIso = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+
     const { data: overdue, error } = await admin
       .from("sessions")
       .select(
-        "id,game_id,players,status,started_at,ends_at,ended_at,group_id,exit_token,user_id,visitor_name,visitor_phone,visitor_email"
+        "id,user_id,game_id,players,status,started_at,ends_at,ended_at,group_id,exit_token,visitor_name,visitor_phone,visitor_email"
       )
       .eq("status", "active")
-      .is("ended_at", null) // QR not scanned yet
+      .is("ended_at", null) // ✅ QR not scanned yet
       .not("ends_at", "is", null)
-      .lt("ends_at", nowMinus5Iso)
-      .limit(50);
+      .lt("ends_at", fiveMinsAgoIso)
+      .limit(100);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     let createdCount = 0;
-    let processedCount = 0;
 
     for (const s of overdue || []) {
-      processedCount++;
+      const group_id = s.group_id || crypto.randomUUID();
+      const endsAt = s.ends_at ? new Date(s.ends_at) : null;
+      if (!endsAt) continue;
 
-      if (!s.ends_at) continue;
-      if (!s.exit_token) continue;
-
-      // ✅ ONE stable key for the whole chain
-      // If group_id missing, we use exit_token as group key
-      const groupKey: string = (s.group_id || s.exit_token) as string;
-
-      // ✅ backfill group_id on old records so they group in UI
-      if (!s.group_id) {
-        await admin.from("sessions").update({ group_id: groupKey }).eq("id", s.id);
-      }
-
-      // load duration
+      // ✅ duration from games table
       const { data: gRow } = await admin
         .from("games")
         .select("duration_minutes")
@@ -62,72 +55,38 @@ export async function POST(req: Request) {
 
       const duration = Number(gRow?.duration_minutes ?? 60);
 
-      // we will extend repeatedly until we have a "current" session that is not overdue
-      let currentSessionId = s.id as string;
-      let currentEndsAt = new Date(s.ends_at as string);
+      // ✅ create next slot
+      const newStart = endsAt;
+      const newEnd = addMinutes(newStart, duration);
 
-      // safety: avoid infinite loops if something goes wrong
-      for (let i = 0; i < 20; i++) {
-        // if NOT overdue anymore, stop
-        if (currentEndsAt.toISOString() >= nowMinus5Iso) break;
+      // ✅ mark this active slot as ended (logical), BUT DO NOT set ended_at (ended_at = QR scan time only)
+      await admin.from("sessions").update({ status: "ended" }).eq("id", s.id);
 
-        const nextStart = currentEndsAt;
-        const nextEnd = addMinutes(nextStart, duration);
+      // ✅ insert next active session (same group + same exit_token)
+      const { error: insErr } = await admin.from("sessions").insert({
+        user_id: s.user_id,
+        game_id: s.game_id,
+        players: s.players ?? 1,
+        status: "active",
 
-        // ✅ If a next session already exists for this exact start time, jump to it (no duplicates)
-        const { data: existingNext } = await admin
-          .from("sessions")
-          .select("id, ends_at")
-          .eq("group_id", groupKey)
-          .eq("started_at", nextStart.toISOString())
-          .limit(1);
+        started_at: newStart.toISOString(),
+        ends_at: newEnd.toISOString(),
+        start_time: newStart.toISOString(),
+        end_time: newEnd.toISOString(),
 
-        if (existingNext && existingNext.length > 0) {
-          // mark current ended (status only)
-          await admin.from("sessions").update({ status: "ended" }).eq("id", currentSessionId);
+        group_id, // uuid
+        exit_token: s.exit_token, // ✅ single QR for whole group
+        entry_token: crypto.randomBytes(12).toString("hex"),
 
-          currentSessionId = existingNext[0].id;
-          currentEndsAt = existingNext[0].ends_at ? new Date(existingNext[0].ends_at) : nextEnd;
-          continue;
-        }
+        visitor_name: s.visitor_name ?? null,
+        visitor_phone: s.visitor_phone ?? null,
+        visitor_email: s.visitor_email ?? null,
+      });
 
-        // ✅ mark current ended (DO NOT set ended_at; ended_at = QR scan time)
-        await admin.from("sessions").update({ status: "ended" }).eq("id", currentSessionId);
-
-        // ✅ create next active session (same group_id + same exit_token)
-        const { data: inserted, error: insErr } = await admin
-          .from("sessions")
-          .insert({
-            user_id: s.user_id,
-            game_id: s.game_id,
-            players: s.players ?? 1,
-            status: "active",
-
-            started_at: nextStart.toISOString(),
-            ends_at: nextEnd.toISOString(),
-            start_time: nextStart.toISOString(),
-            end_time: nextEnd.toISOString(),
-
-            group_id: groupKey,
-            exit_token: s.exit_token, // ✅ SAME QR FOR WHOLE CHAIN
-            entry_token: crypto.randomBytes(12).toString("hex"),
-
-            visitor_name: s.visitor_name ?? null,
-            visitor_phone: s.visitor_phone ?? null,
-            visitor_email: s.visitor_email ?? null,
-          })
-          .select("id, ends_at")
-          .single();
-
-        if (insErr) break;
-
-        createdCount++;
-        currentSessionId = inserted.id;
-        currentEndsAt = inserted.ends_at ? new Date(inserted.ends_at) : nextEnd;
-      }
+      if (!insErr) createdCount += 1;
     }
 
-    return NextResponse.json({ ok: true, processedCount, createdCount });
+    return NextResponse.json({ ok: true, createdCount });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

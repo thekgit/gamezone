@@ -1,58 +1,60 @@
+// ✅ FILE: app/api/admin/games/route.ts
+// ✅ COPY-PASTE FULL FILE
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
+
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
 function slugify(input: string) {
   return input
     .toLowerCase()
     .trim()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
     .replace(/^_+|_+$/g, "");
 }
 
 export async function GET() {
-    try {
-      if (!assertAdmin()) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-  
-      const admin = supabaseAdmin();
-  
-      const { data: games, error } = await admin
-        .from("games")
-        .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
-        .order("created_at", { ascending: false });
-  
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  
-      // ✅ occupancy count (active sessions per game)
-      const nowIso = new Date().toISOString();
-  
-      // ✅ occupancy count (active sessions per game)
-      // IMPORTANT: do NOT use ends_at for occupancy.
-      // slot is occupied until ended_at is set.
-      const { data: sess, error: sErr } = await admin
+  try {
+    if (!assertAdmin()) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const admin = supabaseAdmin();
+
+    const { data: games, error } = await admin
+      .from("games")
+      .select("id, key, name, duration_minutes, court_count, capacity_per_slot, price_rupees, is_active, created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    // ✅ IMPORTANT FIX:
+    // Keep slot green until QR is scanned (ended_at is set).
+    const { data: sess, error: sErr } = await admin
       .from("sessions")
       .select("game_id")
-      .eq("status", "active")
-      .is("ended_at", null);
+      .is("ended_at", null); // ✅ not ended by QR yet
 
-      if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
 
-      const activeByGame: Record<string, number> = {};
-      for (const row of sess || []) {
+    const activeByGame: Record<string, number> = {};
+    for (const row of sess || []) {
       const gid = (row as any).game_id as string | null;
       if (!gid) continue;
       activeByGame[gid] = (activeByGame[gid] || 0) + 1;
-      }
-  
-      return NextResponse.json({ games: games || [], activeByGame });
-    } catch (e: any) {
-      return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
     }
+
+    return NextResponse.json({ games: games || [], activeByGame });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
+}
+
 export async function POST(req: Request) {
   try {
     if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -67,7 +69,6 @@ export async function POST(req: Request) {
     const duration_minutes = Number(body?.duration_minutes ?? 60);
     const court_count = Number(body?.court_count ?? 1);
 
-    // ✅ REQUIRED NOT NULL columns
     const capacity_per_slot = Number(body?.capacity_per_slot ?? 1);
     const price_rupees = Number(body?.price_rupees ?? body?.price ?? 0);
 
@@ -110,7 +111,6 @@ export async function PATCH(req: Request) {
     if (body?.duration_minutes != null) updatePayload.duration_minutes = Number(body.duration_minutes) || 60;
     if (body?.court_count != null) updatePayload.court_count = Number(body.court_count) || 1;
 
-    // ✅ keep these valid if sent
     if (body?.price_rupees != null) updatePayload.price_rupees = Number(body.price_rupees) || 0;
     if (body?.capacity_per_slot != null) updatePayload.capacity_per_slot = Number(body.capacity_per_slot) || 1;
     if (body?.key != null) updatePayload.key = String(body.key).trim();
