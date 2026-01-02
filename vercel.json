@@ -1,0 +1,8 @@
+{
+    "crons": [
+      {
+        "path": "/api/admin/cron/auto-extend",
+        "schedule": "*/1 * * * *"
+      }
+    ]
+  }
