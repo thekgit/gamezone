@@ -100,7 +100,7 @@ export async function POST() {
       // end current session at its planned end
       await admin
         .from("sessions")
-        .update({ status: "ended", ended_at: endsAt.toISOString() })
+        .update({ status: "ended" }) // ✅ DO NOT touch ended_at here
         .eq("id", s.id);
 
       // create next active session (same group_id + same exit_token so QR is ONE for the group)

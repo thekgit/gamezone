@@ -204,7 +204,7 @@ export default function AdminDashboardClient() {
 
           <tbody>
             {rows.map((r) => {
-              const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+              const completed = !!r.exit_time; // ✅ completed only after QR scan
 
               return (
                 <tr key={r.group_id} className="border-t border-white/10 hover:bg-white/5">

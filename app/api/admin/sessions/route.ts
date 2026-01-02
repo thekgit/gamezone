@@ -18,14 +18,13 @@ export async function GET() {
       .select(
         `
         id,
+        group_id,
         created_at,
         status,
         players,
         started_at,
-        ended_at,
         ends_at,
-        start_time,
-        end_time,
+        ended_at,
         visitor_name,
         visitor_phone,
         visitor_email,
@@ -39,7 +38,8 @@ export async function GET() {
 
     const rows = (data || []).map((s: any) => ({
       id: s.id,
-      created_at: s.created_at,
+      group_id: s.group_id ?? null,
+      created_at: s.created_at ?? null,
 
       full_name: s.visitor_name ?? null,
       phone: s.visitor_phone ?? null,
@@ -47,10 +47,10 @@ export async function GET() {
 
       game_name: s?.games?.name ?? null,
 
-      slot_start: s.started_at ?? s.start_time ?? null,
-      slot_end: s.ends_at ?? s.end_time ?? null,
+      slot_start: s.started_at ?? null,
+      slot_end: s.ends_at ?? null,
 
-      // ✅ real exit time = QR scan time if available
+      // ✅ ended_at = QR scan time ONLY
       exit_time: s.ended_at ?? null,
 
       status: s.status ?? null,
