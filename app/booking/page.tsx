@@ -51,7 +51,8 @@ export default function BookingPage() {
 
   useEffect(() => {
     loadGames();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const id = setInterval(loadGames, 5000); // auto refresh every 5 sec
+    return () => clearInterval(id);
   }, []);
 
   const selectedGame = useMemo(
@@ -162,13 +163,7 @@ export default function BookingPage() {
             {loading ? "Booking..." : "Book Slot"}
           </button>
 
-          <button
-            onClick={loadGames}
-            disabled={loading}
-            className="w-full rounded-xl py-3 font-semibold bg-white/10 hover:bg-white/15 disabled:opacity-40"
-          >
-            Reload Games
-          </button>
+          
         </div>
       </div>
     </main>
