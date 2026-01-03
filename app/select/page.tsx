@@ -209,6 +209,7 @@ export default function SelectPage() {
 
         {/* Book button */}
         <button
+          type="button"
           onClick={bookSlot}
           disabled={booking || !gameId || games.length === 0}
           className="w-full mt-5 rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
