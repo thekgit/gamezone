@@ -6,34 +6,36 @@ export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
-    // ✅ Get user_id from cookie/session (depends on your auth)
-    // If you're using Supabase auth cookies, you should read the user via server client.
-    // For now, we’ll accept user_id as query param to keep it simple.
-    const { searchParams } = new URL(req.url);
-    const user_id = searchParams.get("user_id");
-
-    if (!user_id) {
-      return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
-    }
+    const auth = req.headers.get("authorization") || "";
+    const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!jwt) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
 
     const admin = supabaseAdmin();
+
+    const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
+    if (userErr || !userRes?.user?.id) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    const user_id = userRes.user.id;
     const nowIso = new Date().toISOString();
 
     const { data, error } = await admin
       .from("sessions")
-      .select(`
+      .select(
+        `
         id,
-        status,
         players,
+        status,
         started_at,
         ends_at,
-        created_at,
         games:game_id ( name )
-      `)
+      `
+      )
       .eq("user_id", user_id)
       .eq("status", "active")
       .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
-      .order("created_at", { ascending: false });
+      .order("started_at", { ascending: false });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

@@ -2,6 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type ActiveSession = {
   id: string;
@@ -17,20 +24,36 @@ function t(iso?: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function SelectClient({ userId }: { userId: string }) {
+export default function SelectClient() {
+  const router = useRouter();
   const [sessions, setSessions] = useState<ActiveSession[]>([]);
   const [msg, setMsg] = useState("");
 
   const load = async () => {
     setMsg("");
-    const res = await fetch(`/api/sessions/active?user_id=${encodeURIComponent(userId)}`, {
+
+    // ✅ Get logged-in session token
+    const { data: sess } = await supabase.auth.getSession();
+    const jwt = sess?.session?.access_token;
+
+    if (!jwt) {
+      router.replace("/login");
+      return;
+    }
+
+    const res = await fetch(`/api/sessions/active`, {
       cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
     });
+
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setMsg(data?.error || "Failed to load sessions");
       return;
     }
+
     setSessions(data.sessions || []);
   };
 
@@ -48,7 +71,7 @@ export default function SelectClient({ userId }: { userId: string }) {
 
         {msg && <div className="mt-4 text-sm text-red-400">{msg}</div>}
 
-        {/* ✅ Active sessions box */}
+        {/* Active sessions box */}
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Active Sessions</h2>
@@ -61,16 +84,11 @@ export default function SelectClient({ userId }: { userId: string }) {
           </div>
 
           {sessions.length === 0 ? (
-            <div className="mt-4 text-white/60 text-sm">
-              No active sessions right now.
-            </div>
+            <div className="mt-4 text-white/60 text-sm">No active sessions right now.</div>
           ) : (
             <div className="mt-4 space-y-3">
               {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-xl border border-white/10 bg-black/30 p-4"
-                >
+                <div key={s.id} className="rounded-xl border border-white/10 bg-black/30 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-semibold">{s.game_name || "Game"}</div>
                     <div className="text-xs px-3 py-1 rounded-full bg-green-600/20 text-green-300 border border-green-500/30">
@@ -94,17 +112,14 @@ export default function SelectClient({ userId }: { userId: string }) {
           )}
         </div>
 
-        {/* ✅ Slot booking button */}
+        {/* ✅ Slot booking button (IMPORTANT: DO NOT point to /select) */}
         <div className="mt-6">
           <Link
-            href="/select" // change to your actual booking page route if different
+            href="/entry"
             className="block w-full rounded-2xl py-4 text-center font-semibold bg-blue-600 hover:bg-blue-500"
           >
             Slot Booking
           </Link>
-
-          {/* If your booking page is something else, replace /select with it.
-              Example: /slots or /booking */}
         </div>
       </div>
     </main>
