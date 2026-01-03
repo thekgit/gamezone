@@ -114,7 +114,7 @@ export default function SelectClient() {
 
         {/* ✅ Slot booking button (IMPORTANT: DO NOT point to /select) */}
         <div className="mt-6">
-        <Link href="/booking" className="block w-full rounded-2xl py-4 text-center font-semibold bg-blue-600 hover:bg-blue-500">
+        <Link href="/select" className="block w-full rounded-2xl py-4 text-center font-semibold bg-blue-600 hover:bg-blue-500">
           Slot Booking
         </Link>
         </div>
