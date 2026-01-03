@@ -139,15 +139,19 @@ export default function BookingPage() {
 
           <div>
             <label className="text-xs text-white/60">Number of Players</label>
-            <input
-              type="number"
-              min={1}
-              max={20}
+
+            <select
               value={players}
               onChange={(e) => setPlayers(Number(e.target.value))}
               className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
               disabled={loading}
-            />
+            >
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>
+                  {n} Player{n > 1 ? "s" : ""}
+                </option>
+              ))}
+            </select>
           </div>
 
           <button
