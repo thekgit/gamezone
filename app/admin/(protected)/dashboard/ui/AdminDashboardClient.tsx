@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 
+// ✅ ADD THIS IMPORT (this is the missing piece)
+import AparUsersClient from "../../../(panel)/ui/AparUsersClient";
+
 type Row = {
   id: string;
   created_at: string;
@@ -19,7 +22,7 @@ type Row = {
   slot_end: string | null;
 
   status: string | null;
-  exit_time: string | null; // ✅ UI field (mapped from ended_at in API)
+  exit_time: string | null;
 };
 
 type QrItem = {
@@ -37,7 +40,10 @@ function dt(iso?: string | null) {
 
 function t(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function AdminDashboardClient() {
@@ -71,7 +77,8 @@ export default function AdminDashboardClient() {
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
-      const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+      const completed =
+        (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
       m.set(r.id, completed);
     }
     return m;
@@ -83,6 +90,7 @@ export default function AdminDashboardClient() {
 
   const genQr = async (r: Row) => {
     const session_id = r.id;
+
     setMsg("");
     setGenerating((g) => ({ ...g, [session_id]: true }));
 
@@ -130,7 +138,11 @@ export default function AdminDashboardClient() {
   };
 
   return (
-    <div className="text-white">
+    <div className="text-white space-y-6">
+      {/* ✅ NEW: APAR Import + Manual Create UI (shows ABOVE QR section) */}
+      <AparUsersClient />
+
+      {/* Existing header */}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
@@ -142,15 +154,21 @@ export default function AdminDashboardClient() {
 
       {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
 
+      {/* MULTI-QR BOARD */}
       {qrs.length > 0 && (
         <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="font-semibold mb-3">Active Exit QRs</div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {qrs.map((q) => (
-              <div key={q.session_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
+              <div
+                key={q.session_id}
+                className="rounded-xl border border-white/10 bg-black/30 p-3"
+              >
                 <div className="text-sm font-semibold">{q.label}</div>
-                <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
+                <div className="text-xs text-white/50 mt-1">
+                  Generated: {q.generatedAt}
+                </div>
 
                 <div className="mt-3 flex justify-center">
                   <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
@@ -165,6 +183,7 @@ export default function AdminDashboardClient() {
         </div>
       )}
 
+      {/* TABLE */}
       <div className="mt-6 overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-white/70">
@@ -183,16 +202,22 @@ export default function AdminDashboardClient() {
 
           <tbody>
             {rows.map((r) => {
-              const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+              const completed =
+                (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
 
               return (
-                <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
+                <tr
+                  key={r.id}
+                  className="border-t border-white/10 hover:bg-white/5"
+                >
                   <td className="p-3">{dt(r.created_at)}</td>
                   <td className="p-3">{r.full_name || "-"}</td>
                   <td className="p-3">{r.phone || "-"}</td>
                   <td className="p-3">{r.email || "-"}</td>
                   <td className="p-3">{r.game_name || "-"}</td>
-                  <td className="p-3">{typeof r.players === "number" ? r.players : "-"}</td>
+                  <td className="p-3">
+                    {typeof r.players === "number" ? r.players : "-"}
+                  </td>
                   <td className="p-3">
                     {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
                   </td>
@@ -200,7 +225,9 @@ export default function AdminDashboardClient() {
 
                   <td className="p-3">
                     {completed ? (
-                      <span className="text-green-400 font-semibold">Session Completed</span>
+                      <span className="text-green-400 font-semibold">
+                        Session Completed
+                      </span>
                     ) : (
                       <button
                         onClick={() => genQr(r)}
