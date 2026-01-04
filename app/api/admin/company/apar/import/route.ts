@@ -71,13 +71,19 @@ export async function POST(req: Request) {
 
       // 1) Upsert employee record
       const { data: emp, error: empErr } = await admin
-        .from("company_employees")
-        .upsert(
-          { company_key, employee_id, full_name, phone, email },
-          { onConflict: "company_key,email" }
-        )
-        .select("email")
-        .single();
+      .from("company_employees")
+      .upsert(
+        {
+          company_key: "apar",
+          employee_id: r.employee_id,
+          full_name: r.full_name,
+          phone: r.phone,
+          email: r.email,
+        },
+        {
+          onConflict: "company_key,email",
+        }
+      );
 
       if (empErr) {
         errors.push({ employee_id, email, error: empErr.message });

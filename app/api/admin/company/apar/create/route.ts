@@ -56,15 +56,19 @@ export async function POST(req: Request) {
     const admin = supabaseAdmin();
 
     // 1) Upsert into your company employees table (create this table if not exists)
-    const { error: upErr } = await admin.from("company_employees").upsert(
+    const { error: upErr } = await admin
+    .from("company_employees")
+    .upsert(
       {
-        company_key,
+        company_key: "apar",
         employee_id,
         full_name,
         phone,
         email,
       },
-      { onConflict: "company_key,email" }
+      {
+        onConflict: "company_key,email",
+      }
     );
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
 
