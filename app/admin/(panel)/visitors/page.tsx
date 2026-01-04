@@ -3,11 +3,11 @@ import VisitorsTableClient from "../ui/VisitorsTableClient";
 
 export default function AdminVisitorsPage() {
   return (
-    <div className="text-white">
-      {/* ✅ NEW: Import + Manual create panel */}
+    <div className="space-y-6">
+      {/* ✅ NEW: Import + Manual Create UI (APAR) */}
       <AparUsersClient />
 
-      {/* Existing table */}
+      {/* ✅ Existing: Visitors sessions + QR table */}
       <VisitorsTableClient />
     </div>
   );
