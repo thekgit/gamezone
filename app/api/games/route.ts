@@ -5,10 +5,10 @@ export async function GET() {
   try {
     const admin = supabaseAdmin();
     const { data, error } = await admin
-      .from("games")
-      .select("id, name, duration_minutes, court_count, price")
-      .eq("is_active", true)
-      .order("created_at", { ascending: true });
+    .from("games")
+    .select("id, name, court_count, duration_minutes, price_rupees")
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ games: data || [] });

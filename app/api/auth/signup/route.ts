@@ -16,6 +16,12 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const full_name = String(body?.full_name || "").trim();
     const phone = String(body?.phone || "").trim();
+    if (!/^\d{10}$/.test(phone)) {
+      return NextResponse.json(
+        { error: "Phone number must be exactly 10 digits" },
+        { status: 400 }
+      );
+    }
     const email = String(body?.email || "").trim().toLowerCase();
 
     if (!email) {

@@ -39,6 +39,27 @@ export default function LoginClient() {
         return;
       }
 
+      // ✅ after login, check if user must change password
+      const { data: sess } = await supabase.auth.getSession();
+      const jwt = sess?.session?.access_token;
+
+      if (!jwt) {
+        router.replace("/login");
+        return;
+      }
+
+      const res = await fetch("/api/profile/password-set", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      const data = await res.json().catch(() => ({}));
+
+      // If your API returns must_change_password:
+      if (data?.must_change_password === true) {
+        router.replace(`/set-password?next=${encodeURIComponent(next)}`);
+        return;
+      }
+
       router.replace(next);
     } finally {
       setLoading(false);
@@ -79,19 +100,17 @@ export default function LoginClient() {
         >
           {loading ? "Logging in..." : "Login"}
         </button>
+
         <div className="mt-2 flex justify-end">
-            <a
-              href="/forgot-password"
-              className="text-sm text-blue-400 hover:text-blue-300"
-            >
-              Forgot password?
-            </a>
-          </div>
+          <a href="/forgot-password" className="text-sm text-blue-400 hover:text-blue-300">
+            Forgot password?
+          </a>
+        </div>
+
         <div className="mt-4 text-sm text-white/60">
           New here?{" "}
           <Link className="text-white underline" href="/signup">
             Create account
-        
           </Link>
         </div>
       </div>
