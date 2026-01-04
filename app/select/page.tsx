@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 
@@ -30,12 +30,20 @@ export default function SelectPage() {
 
   const [slotFullOpen, setSlotFullOpen] = useState(false);
 
+  // ✅ track latest selected gameId (prevents stale closure issue)
+  const gameIdRef = useRef<string>("");
+  useEffect(() => {
+    gameIdRef.current = gameId;
+  }, [gameId]);
+
+  // ✅ track if user manually changed game (so auto-refresh won’t override)
+  const userPickedGameRef = useRef(false);
+
   const selectedGame = useMemo(
     () => games.find((g) => g.id === gameId) || null,
     [games, gameId]
   );
 
-  // ✅ auto-load games (and keep updated)
   const loadGames = async () => {
     setMsg("");
     setLoadingGames(true);
@@ -52,11 +60,17 @@ export default function SelectPage() {
 
       setGames(active);
 
-      // if no selected game, pick first automatically
-      if (!gameId && active.length > 0) setGameId(active[0].id);
+      const currentSelected = gameIdRef.current;
 
-      // if selected game got deleted/inactive, reset to first
-      if (gameId && active.length > 0 && !active.some((g) => g.id === gameId)) {
+      // ✅ If user has NOT picked a game yet, auto-select first game
+      if (!userPickedGameRef.current && !currentSelected && active.length > 0) {
+        setGameId(active[0].id);
+        return;
+      }
+
+      // ✅ If selected game got removed/inactive, fallback to first game
+      if (currentSelected && active.length > 0 && !active.some((g) => g.id === currentSelected)) {
+        userPickedGameRef.current = false; // allow auto-pick again
         setGameId(active[0].id);
       }
     } finally {
@@ -68,11 +82,8 @@ export default function SelectPage() {
     loadGames();
     const id = setInterval(loadGames, 5000);
     return () => clearInterval(id);
-    // IMPORTANT: do NOT depend on `gameId` here (prevents rerender loops)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ book slot (ONLY on click)
   const bookSlot = async () => {
     setMsg("");
     setSlotFullOpen(false);
@@ -84,7 +95,6 @@ export default function SelectPage() {
 
     setBooking(true);
     try {
-      // ✅ require login (JWT)
       const { data: sess } = await supabase.auth.getSession();
       const jwt = sess?.session?.access_token;
       if (!jwt) {
@@ -109,7 +119,6 @@ export default function SelectPage() {
       if (!res.ok) {
         const err = String(data?.error || `Booking failed (${res.status})`);
 
-        // ✅ SLOT_FULL popup
         if (err.toUpperCase().includes("SLOT_FULL")) {
           setSlotFullOpen(true);
           return;
@@ -119,7 +128,6 @@ export default function SelectPage() {
         return;
       }
 
-      // ✅ success -> go to entry success page (same as before)
       router.push("/entry");
     } finally {
       setBooking(false);
@@ -128,14 +136,13 @@ export default function SelectPage() {
 
   return (
     <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
-      {/* SLOT FULL POPUP */}
       {slotFullOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b0b0b] p-5">
             <div className="text-lg font-bold">Slot Full</div>
             <div className="text-white/70 text-sm mt-2">
-              All slots for this game are currently booked. Please try another game
-              or wait for a slot to free up.
+              All slots for this game are currently booked. Please try another game or wait for a slot
+              to free up.
             </div>
             <button
               onClick={() => setSlotFullOpen(false)}
@@ -149,20 +156,19 @@ export default function SelectPage() {
 
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6">
         <div className="text-lg font-bold">Select Game</div>
-        <div className="text-white/60 text-sm mt-1">
-          Choose game & number of players.
-        </div>
+        <div className="text-white/60 text-sm mt-1">Choose game & number of players.</div>
 
-        {/* message */}
         {msg && <div className="mt-3 text-sm text-red-400">{msg}</div>}
 
-        {/* Game dropdown */}
         <div className="mt-4">
           <label className="text-xs text-white/60">Game</label>
           <select
             className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
             value={gameId}
-            onChange={(e) => setGameId(e.target.value)}
+            onChange={(e) => {
+              userPickedGameRef.current = true; // ✅ lock user choice
+              setGameId(e.target.value);
+            }}
             disabled={loadingGames}
           >
             {games.map((g) => (
@@ -176,8 +182,7 @@ export default function SelectPage() {
           <div className="mt-2 text-xs text-white/50">
             {selectedGame ? (
               <>
-                Duration: {selectedGame.duration_minutes} mins • Slots:{" "}
-                {selectedGame.court_count}
+                Duration: {selectedGame.duration_minutes} mins • Slots: {selectedGame.court_count}
               </>
             ) : loadingGames ? (
               "Loading games..."
@@ -187,7 +192,6 @@ export default function SelectPage() {
           </div>
         </div>
 
-        {/* Players dropdown */}
         <div className="mt-4">
           <label className="text-xs text-white/60">Number of Players</label>
           <select
@@ -207,11 +211,10 @@ export default function SelectPage() {
           </select>
         </div>
 
-        {/* Book button */}
         <button
           type="button"
           onClick={bookSlot}
-          disabled={booking || !gameId || games.length === 0}
+          disabled={booking || !gameId}
           className="w-full mt-5 rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {booking ? "Booking..." : "Book Slot"}
