@@ -25,10 +25,13 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}));
+
     const employee_id = normEmp(body.employee_id);
-    const full_name_raw = normName(body.full_name);
-    const phone = normPhone(body.phone);
     const email = normEmail(body.email);
+    const phone = normPhone(body.phone);
+
+    // ✅ full_name NOT NULL everywhere
+    const full_name = normName(body.full_name) || employee_id || email;
 
     if (!employee_id || !email) {
       return NextResponse.json(
@@ -37,13 +40,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const full_name = full_name_raw || employee_id;
-
     const admin = supabaseAdmin();
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ 1) Upsert employee row
+    // ✅ 1) Upsert employee row (always)
     const { error: empErr } = await admin
       .from("company_employees")
       .upsert(
@@ -67,19 +68,38 @@ export async function POST(req: Request) {
       page: 1,
       perPage: 2000,
     });
-    if (listErr) {
-      return NextResponse.json({ error: listErr.message }, { status: 500 });
-    }
+    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
 
     const existing = (listRes?.users || []).find(
       (u) => (u.email || "").toLowerCase() === email
     );
 
+    // ✅ If already exists, just ensure profiles has required fields (without forcing password reset)
     if (existing?.id) {
+      const { error: profErr } = await admin
+        .from("profiles")
+        .upsert(
+          {
+            user_id: existing.id,
+            email,
+            full_name, // ✅ NOT NULL
+            phone: phone || null,
+            employee_id, // if column exists; if not, remove this line
+            // IMPORTANT: do NOT touch must_change_password / password_set for existing users
+          },
+          { onConflict: "user_id" }
+        );
+
+      // If your profiles table does NOT have employee_id column, this can error.
+      // If you get an error mentioning employee_id missing, remove employee_id line above.
+      if (profErr) {
+        return NextResponse.json({ error: profErr.message }, { status: 500 });
+      }
+
       return NextResponse.json({
         ok: true,
         created_auth: false,
-        message: "User already exists. Kept as-is.",
+        message: "User already exists. Kept as-is (password not reset).",
       });
     }
 
@@ -103,15 +123,19 @@ export async function POST(req: Request) {
 
     const uid = created?.user?.id;
     if (!uid) {
-      return NextResponse.json({ error: "User id missing after create" }, { status: 500 });
+      return NextResponse.json({ error: "User id missing after create." }, { status: 500 });
     }
 
-    // ✅ 4) PROFILES: store ONLY flags, keyed by user_id (NOT id)
+    // ✅ 4) Create/Upsert profiles for NEW user (include NOT NULL full_name!)
     const { error: profErr } = await admin
       .from("profiles")
       .upsert(
         {
           user_id: uid,
+          email,
+          full_name, // ✅ NOT NULL
+          phone: phone || null,
+          employee_id, // if column exists; if not, remove this line
           must_change_password: true,
           password_set: false,
         },
@@ -129,9 +153,6 @@ export async function POST(req: Request) {
       message: "Created NEW user with default password NEW12345.",
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }

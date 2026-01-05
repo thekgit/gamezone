@@ -37,6 +37,9 @@ export async function POST(req: Request) {
     const company_key = "apar";
     const company = "apar";
 
+    // ✅ Keep auth creation limited to avoid timeouts
+    const MAX_AUTH_CREATE_PER_REQUEST = 25;
+
     // ✅ Load existing auth users ONCE
     const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
       page: 1,
@@ -65,15 +68,15 @@ export async function POST(req: Request) {
     for (const r of rows) {
       const email = normEmail(r.email);
       const employee_id = normEmp(r.employee_id);
-      const full_name_raw = normName(r.full_name);
       const phone = normPhone(r.phone);
+
+      // ✅ full_name NOT NULL
+      const full_name = normName(r.full_name) || employee_id || email;
 
       if (!email || !employee_id) {
         invalid++;
         continue;
       }
-
-      const full_name = full_name_raw || employee_id; // DB full_name NOT NULL
 
       cleanedEmployees.push({
         company,
@@ -95,17 +98,13 @@ export async function POST(req: Request) {
 
     if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
 
-    // ✅ 2) Create auth users for NEW emails + create profile flags
-    const MAX_AUTH_CREATE_PER_REQUEST = 25;
-
+    // ✅ 2) Create auth users + profiles for NEW emails
     let imported = cleanedEmployees.length;
     let existing_kept = 0;
     let created_auth = 0;
     let skipped_auth_due_to_limit = 0;
 
-    // ✅ profiles table PK is user_id
-    const newProfiles: { user_id: string; must_change_password: boolean; password_set: boolean }[] =
-      [];
+    const newProfiles: any[] = [];
 
     for (const r of cleanedEmployees) {
       const email = r.email;
@@ -144,9 +143,13 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // ✅ PROFILES: store ONLY flags, keyed by user_id
+      // ✅ profiles requires full_name NOT NULL
       newProfiles.push({
         user_id: uid,
+        email,
+        full_name: r.full_name || r.employee_id || email, // ✅ never null
+        phone: r.phone,
+        employee_id: r.employee_id, // if column exists; if not, remove this line
         must_change_password: true,
         password_set: false,
       });
@@ -171,7 +174,7 @@ export async function POST(req: Request) {
       skipped_auth_due_to_limit,
       hint:
         skipped_auth_due_to_limit > 0
-          ? "Auth creation limited per request. Upload in chunks (50 rows) OR click Import again until skipped_auth_due_to_limit becomes 0."
+          ? "Auth creation is limited per request. Keep clicking Import again (or chunk 50 rows) until skipped_auth_due_to_limit becomes 0."
           : "Done.",
     });
   } catch (e: any) {
