@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import { createClient } from "@supabase/supabase-js";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 const supabase = createClient(
@@ -10,11 +10,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function SetPasswordClient() {
+export default function SetPasswordClient({ next }: { next: string }) {
   const router = useRouter();
-  const sp = useSearchParams();
-
-  const next = sp.get("next") || "/home";
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -25,43 +22,31 @@ export default function SetPasswordClient() {
 
   const onSave = async () => {
     setMsg("");
-    if (!canSave) return;
+    if (!canSave) {
+      setMsg("Password must be at least 6 characters and match confirmation.");
+      return;
+    }
 
     setLoading(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      const jwt = sess?.session?.access_token;
-
-      if (!jwt) {
+      if (!sess?.session) {
         router.replace("/login");
         return;
       }
 
-      // ✅ 1) Update Supabase Auth password
-      const { error: upErr } = await supabase.auth.updateUser({
+      // ✅ Update password + clear the "must change" flag
+      const { error } = await supabase.auth.updateUser({
         password,
         data: { must_change_password: false },
       });
 
-      if (upErr) {
-        setMsg(upErr.message);
+      if (error) {
+        setMsg(error.message);
         return;
       }
 
-      // ✅ 2) Mark password_set = true in your profiles (source of truth)
-      const done = await fetch("/api/profile/password-set", {
-        method: "POST",
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-
-      const doneData = await done.json().catch(() => ({}));
-      if (!done.ok) {
-        setMsg(doneData?.error || "Password saved, but failed to update profile flags.");
-        return;
-      }
-
-      router.replace(next);
+      router.replace(next || "/home");
     } finally {
       setLoading(false);
     }
@@ -73,7 +58,7 @@ export default function SetPasswordClient() {
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className="text-3xl font-bold">Set new password</h1>
           <p className="text-white/60 mt-2 text-sm">
-            This is required on your first login. After saving, you’ll continue.
+            This is required on your first login. After saving, you’ll continue to your dashboard.
           </p>
         </motion.div>
 
