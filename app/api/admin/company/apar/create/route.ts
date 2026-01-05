@@ -20,9 +20,7 @@ function normName(v: any) {
 
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const employee_id = normEmp(body.employee_id);
@@ -31,60 +29,40 @@ export async function POST(req: Request) {
     const email = normEmail(body.email);
 
     if (!employee_id || !email) {
-      return NextResponse.json(
-        { error: "Employee ID and Email are required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Employee ID and Email are required." }, { status: 400 });
     }
 
     const admin = supabaseAdmin();
     const company_key = "apar";
 
-    // ✅ 1) Upsert into company_employees (send BOTH company + company_key)
+    // ✅ always upsert employee row
     const { error: empErr } = await admin
       .from("company_employees")
       .upsert(
         {
           company_key,
-          company: company_key, // ✅ fixes NOT NULL constraint
+          company: company_key, // ✅ if your table needs this NOT NULL
           employee_id,
           full_name: full_name || null,
           phone: phone || null,
           email,
         },
-        { onConflict: "company_key,email" } // ✅ matches your UNIQUE
+        { onConflict: "company_key,email" }
       );
 
-    if (empErr) {
-      return NextResponse.json({ error: empErr.message }, { status: 500 });
-    }
+    if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
 
-    // ✅ 2) If Auth user already exists → DO NOT change password
+    // ✅ list users and check if already exists
     const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
       page: 1,
-      perPage: 200,
+      perPage: 2000,
     });
     if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
 
-    const existing = (listRes?.users || []).find(
-      (u) => (u.email || "").toLowerCase() === email
-    );
+    const existing = (listRes?.users || []).find((u) => (u.email || "").toLowerCase() === email);
 
     if (existing?.id) {
-      // optional: ensure profile row exists, but do not force password change
-      await admin.from("profiles").upsert(
-        {
-          id: existing.id,
-          email,
-          company: company_key,
-          employee_id,
-          full_name: full_name || null,
-          phone: phone || null,
-          // DO NOT set must_change_password for existing users
-        },
-        { onConflict: "id" }
-      );
-
+      // ✅ already exists → keep as-is, do NOT reset password
       return NextResponse.json({
         ok: true,
         created_auth: false,
@@ -92,44 +70,26 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ 3) Create Auth user with default password
-    const { data: createdUser, error: createErr } =
-      await admin.auth.admin.createUser({
-        email,
-        password: "NEW12345",
-        email_confirm: true,
-      });
-
-    if (createErr) {
-      return NextResponse.json({ error: createErr.message }, { status: 500 });
-    }
-
-    const uid = createdUser?.user?.id;
-    if (!uid) {
-      return NextResponse.json({ error: "User id missing after create" }, { status: 500 });
-    }
-
-    // ✅ 4) Create profile and force password change only for NEW users
-    const { error: profErr } = await admin.from("profiles").upsert(
-      {
-        id: uid,
-        email,
-        company: company_key,
-        employee_id,
-        full_name: full_name || null,
-        phone: phone || null,
+    // ✅ create auth user with default password + force change on first login via metadata
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password: "NEW12345",
+      email_confirm: true,
+      user_metadata: {
         must_change_password: true,
+        company_key,
+        employee_id,
+        full_name,
+        phone,
       },
-      { onConflict: "id" }
-    );
+    });
 
-    if (profErr) {
-      return NextResponse.json({ error: profErr.message }, { status: 500 });
-    }
+    if (createErr) return NextResponse.json({ error: createErr.message }, { status: 500 });
 
     return NextResponse.json({
       ok: true,
       created_auth: true,
+      user_id: created?.user?.id,
       message: "Created user with default password NEW12345.",
     });
   } catch (e: any) {

@@ -27,31 +27,26 @@ function normName(v: any) {
 
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const rows = Array.isArray(body?.rows) ? (body.rows as Row[]) : [];
-
-    if (!rows.length) {
-      return NextResponse.json({ error: "No rows received." }, { status: 400 });
-    }
+    if (!rows.length) return NextResponse.json({ error: "No rows received." }, { status: 400 });
 
     const admin = supabaseAdmin();
     const company_key = "apar";
 
-    // ✅ Get users list once
+    // ✅ load existing auth users once
     const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
       page: 1,
       perPage: 2000,
     });
     if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
 
-    const existingEmails = new Map<string, string>(); // email -> uid
+    const existingEmails = new Set<string>();
     for (const u of listRes?.users || []) {
       const em = (u.email || "").toLowerCase();
-      if (em && u.id) existingEmails.set(em, u.id);
+      if (em) existingEmails.add(em);
     }
 
     let imported = 0;
@@ -70,13 +65,13 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // ✅ Upsert employee record (send BOTH company_key + company)
+      // ✅ employee table upsert
       const { error: empErr } = await admin
         .from("company_employees")
         .upsert(
           {
             company_key,
-            company: company_key, // ✅ fixes NOT NULL constraint
+            company: company_key, // ✅ if required NOT NULL
             employee_id,
             full_name: full_name || null,
             phone: phone || null,
@@ -92,56 +87,33 @@ export async function POST(req: Request) {
 
       imported++;
 
-      const existingUid = existingEmails.get(email);
-
-      if (existingUid) {
+      // ✅ if auth user exists, keep as-is
+      if (existingEmails.has(email)) {
         existingKept++;
-
-        // Optional: fill missing profile without forcing password change
-        await admin.from("profiles").upsert(
-          {
-            id: existingUid,
-            email,
-            company: company_key,
-            employee_id,
-            full_name: full_name || null,
-            phone: phone || null,
-          },
-          { onConflict: "id" }
-        );
-
         continue;
       }
 
-      // ✅ Create auth user
-      const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      // ✅ create auth user with metadata
+      const { error: createErr } = await admin.auth.admin.createUser({
         email,
         password: "NEW12345",
         email_confirm: true,
+        user_metadata: {
+          must_change_password: true,
+          company_key,
+          employee_id,
+          full_name,
+          phone,
+        },
       });
 
-      if (createErr || !created?.user?.id) {
+      if (createErr) {
         invalid++;
         continue;
       }
 
-      const uid = created.user.id;
-      existingEmails.set(email, uid);
       createdAuth++;
-
-      // ✅ force password change only for NEW users
-      await admin.from("profiles").upsert(
-        {
-          id: uid,
-          email,
-          company: company_key,
-          employee_id,
-          full_name: full_name || null,
-          phone: phone || null,
-          must_change_password: true,
-        },
-        { onConflict: "id" }
-      );
+      existingEmails.add(email);
     }
 
     return NextResponse.json({
