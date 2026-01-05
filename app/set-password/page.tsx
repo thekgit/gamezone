@@ -6,9 +6,10 @@ export default function SetPasswordPage({
 }: {
   searchParams?: { next?: string };
 }) {
-  const next = typeof searchParams?.next === "string" && searchParams.next.length > 0
-    ? searchParams.next
-    : "/home";
+  const next =
+    typeof searchParams?.next === "string" && searchParams.next.length > 0
+      ? searchParams.next
+      : "/home";
 
   return (
     <Suspense fallback={<div className="min-h-screen bg-black text-white flex items-center justify-center">Loading...</div>}>

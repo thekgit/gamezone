@@ -17,14 +17,12 @@ export async function GET(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // ✅ Reads the logged-in user from JWT
     const { data, error } = await admin.auth.getUser(jwt);
     if (error) return NextResponse.json({ error: error.message }, { status: 401 });
 
     const user = data?.user;
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 401 });
 
-    // ✅ We rely on metadata flag (set when admin creates/imports users)
     const must_change_password = user.user_metadata?.must_change_password === true;
 
     return NextResponse.json({

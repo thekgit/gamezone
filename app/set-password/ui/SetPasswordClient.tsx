@@ -22,6 +22,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
 
   const onSave = async () => {
     setMsg("");
+
     if (!canSave) {
       setMsg("Password must be at least 6 characters and match confirmation.");
       return;
@@ -35,7 +36,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
         return;
       }
 
-      // ✅ Update password + clear the "must change" flag
+      // ✅ Set password + clear must_change_password flag
       const { error } = await supabase.auth.updateUser({
         password,
         data: { must_change_password: false },
@@ -58,7 +59,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className="text-3xl font-bold">Set new password</h1>
           <p className="text-white/60 mt-2 text-sm">
-            This is required on your first login. After saving, you’ll continue to your dashboard.
+            This is required on your first login.
           </p>
         </motion.div>
 

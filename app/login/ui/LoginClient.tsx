@@ -15,6 +15,7 @@ export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // After login, default to /home (your active sessions page)
   const next = searchParams.get("next") || "/home";
 
   const [email, setEmail] = useState("");
@@ -45,23 +46,21 @@ export default function LoginClient() {
         return;
       }
 
-      // ✅ MUST check whether password must be changed
-      const ps = await fetch("/api/profile/password-set", {
+      // ✅ Check if this user must change password
+      const psRes = await fetch("/api/profile/password-set", {
         method: "GET",
         cache: "no-store",
         headers: { Authorization: `Bearer ${jwt}` },
       });
 
-      const psData = await ps.json().catch(() => ({}));
+      const psData = await psRes.json().catch(() => ({}));
 
-      if (!ps.ok) {
+      if (!psRes.ok) {
         setMsg(psData?.error || "Failed to verify password status.");
         return;
       }
 
-      const mustChange = psData?.must_change_password === true;
-
-      if (mustChange) {
+      if (psData?.must_change_password === true) {
         router.replace(`/set-password?next=${encodeURIComponent(next)}`);
         return;
       }
