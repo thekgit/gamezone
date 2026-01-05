@@ -109,36 +109,118 @@ export default function AparUsersClient() {
     setProgressText("");
     setProgressPct(0);
     cancelRef.current = false;
-
+  
     const ext = file.name.toLowerCase().split(".").pop();
-
+  
+    // header detection helper
+    const looksLikeHeader = (cells: any[]) => {
+      const joined = cells.map((c) => String(c ?? "")).join(" ").toLowerCase();
+      // must include at least employee + email (and usually name/mobile)
+      return (
+        joined.includes("employee") &&
+        (joined.includes("email") || joined.includes("e-mail")) &&
+        (joined.includes("mobile") || joined.includes("phone") || joined.includes("contact") || joined.includes("no"))
+      );
+    };
+  
+    const buildObjectsFromRows = (rows: any[][], headerIdx: number) => {
+      const headers = rows[headerIdx].map((h) => String(h ?? "").trim());
+      const dataRows = rows.slice(headerIdx + 1);
+  
+      const objs: Record<string, any>[] = dataRows
+        .filter((r) => r && r.length > 0)
+        .map((r) => {
+          const obj: Record<string, any> = {};
+          for (let i = 0; i < headers.length; i++) {
+            const key = headers[i] || `col_${i}`;
+            obj[key] = r[i] ?? "";
+          }
+          return obj;
+        });
+  
+      return objs;
+    };
+  
     try {
+      // =========================
+      // ✅ CSV: parse as raw rows, find header row, rebuild objects
+      // =========================
       if (ext === "csv") {
         const text = await file.text();
-        const res = Papa.parse<Record<string, any>>(text, {
-          header: true,
+  
+        const res = Papa.parse<any[]>(text, {
+          header: false,           // IMPORTANT: raw rows
           skipEmptyLines: true,
         });
-
-        const rows = (res.data || [])
-          .map(mapAnyRowToParsed)
-          .filter(Boolean) as ParsedRow[];
-
-        setParsed(rows);
-        setMsg(`✅ Parsed ${rows.length} valid rows from CSV.`);
+  
+        const rows = (res.data || []) as any[][];
+        if (!rows.length) {
+          setMsg("CSV is empty.");
+          return;
+        }
+  
+        // find header row
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rows.length, 30); i++) {
+          if (looksLikeHeader(rows[i])) {
+            headerIdx = i;
+            break;
+          }
+        }
+  
+        if (headerIdx === -1) {
+          setMsg(
+            "Could not detect header row in CSV. Make sure file contains columns like Employee Id, Name, Mobile No., E-Mail."
+          );
+          return;
+        }
+  
+        const objs = buildObjectsFromRows(rows, headerIdx);
+  
+        const parsedRows = objs.map(mapAnyRowToParsed).filter(Boolean) as ParsedRow[];
+        setParsed(parsedRows);
+  
+        setMsg(`✅ Parsed ${parsedRows.length} valid rows from CSV (header row detected at line ${headerIdx + 1}).`);
         return;
       }
-
-      // xlsx/xls
+  
+      // =========================
+      // ✅ XLSX/XLS: read as 2D rows, find header row, rebuild objects
+      // =========================
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const sheetName = wb.SheetNames[0];
       const ws = wb.Sheets[sheetName];
-      const json = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: "" });
-
-      const rows = (json || []).map(mapAnyRowToParsed).filter(Boolean) as ParsedRow[];
-      setParsed(rows);
-      setMsg(`✅ Parsed ${rows.length} valid rows from Excel.`);
+  
+      // read as raw rows
+      const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: "" }) as any[][];
+  
+      if (!rows.length) {
+        setMsg("Sheet is empty.");
+        return;
+      }
+  
+      // find header row
+      let headerIdx = -1;
+      for (let i = 0; i < Math.min(rows.length, 30); i++) {
+        if (looksLikeHeader(rows[i])) {
+          headerIdx = i;
+          break;
+        }
+      }
+  
+      if (headerIdx === -1) {
+        setMsg(
+          "Could not detect header row in XLSX. Make sure sheet has columns like Employee Id, Name, Mobile No., E-Mail."
+        );
+        return;
+      }
+  
+      const objs = buildObjectsFromRows(rows, headerIdx);
+      const parsedRows = objs.map(mapAnyRowToParsed).filter(Boolean) as ParsedRow[];
+  
+      setParsed(parsedRows);
+      setMsg(`✅ Parsed ${parsedRows.length} valid rows from XLSX (header row detected at row ${headerIdx + 1}).`);
     } catch (e: any) {
       setMsg(e?.message || "Failed to parse file");
     }
