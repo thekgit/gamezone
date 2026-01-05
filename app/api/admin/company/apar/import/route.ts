@@ -25,35 +25,37 @@ function normName(v: any) {
   return String(v || "").trim();
 }
 
-function isAlreadyExistsAuthError(e: any) {
-  const msg = String(e?.message || e?.error_description || e || "").toLowerCase();
-  return (
-    msg.includes("already registered") ||
-    msg.includes("already exists") ||
-    msg.includes("user already") ||
-    msg.includes("duplicate") ||
-    msg.includes("email address already")
-  );
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!assertAdmin()) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const rows = Array.isArray(body?.rows) ? (body.rows as Row[]) : [];
-    if (!rows.length) return NextResponse.json({ error: "No rows received." }, { status: 400 });
+    if (!rows.length) {
+      return NextResponse.json({ error: "No rows received." }, { status: 400 });
+    }
 
     const admin = supabaseAdmin();
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ Clean rows for employee upsert
-    const employees: {
+    // ✅ Load existing auth users (we need email existence)
+    const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 2000,
+    });
+    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
+
+    const existingEmails = new Set<string>();
+    for (const u of listRes?.users || []) {
+      const em = (u.email || "").toLowerCase();
+      if (em) existingEmails.add(em);
+    }
+
+    // ✅ Clean rows
+    const cleaned: {
       company: string;
       company_key: string;
       employee_id: string;
@@ -75,38 +77,82 @@ export async function POST(req: Request) {
         continue;
       }
 
-      employees.push({
+      const full_name = full_name_raw || employee_id;
+
+      cleaned.push({
         company,
         company_key,
         employee_id,
-        full_name: full_name_raw || employee_id, // full_name is NOT NULL
+        full_name,
         phone: phone || null,
         email,
       });
     }
 
-    if (!employees.length) {
+    if (!cleaned.length) {
       return NextResponse.json({ error: "No valid rows to import.", invalid }, { status: 400 });
     }
 
-    // ✅ 1) Bulk upsert company_employees (fast)
-    const { error: empErr } = await admin
-      .from("company_employees")
-      .upsert(employees, { onConflict: "company_key,email" });
+    // ✅ Save employees
+    // We CANNOT safely bulk upsert on only (company_key,email) because employee_id is also unique.
+    // So we do it row-by-row but still fast enough (50 rows per request from UI).
+    let employees_saved = 0;
+    for (const r of cleaned) {
+      const { error: upErr } = await admin
+        .from("company_employees")
+        .upsert(
+          {
+            company: r.company,
+            company_key: r.company_key,
+            employee_id: r.employee_id,
+            full_name: r.full_name,
+            phone: r.phone,
+            email: r.email,
+          },
+          { onConflict: "company_key,email" }
+        );
 
-    if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
+      if (!upErr) {
+        employees_saved++;
+        continue;
+      }
 
-    // ✅ 2) Create auth users row-by-row (no listUsers)
-    // Existing users will throw "already registered" → we count as existing_kept
+      // If employee_id unique blocks, fallback: update by employee_id instead
+      // (keeps the record correct even if email changed)
+      const { error: updErr } = await admin
+        .from("company_employees")
+        .update({
+          full_name: r.full_name,
+          phone: r.phone,
+          email: r.email,
+        })
+        .eq("company_key", company_key)
+        .eq("employee_id", r.employee_id);
+
+      if (updErr) {
+        invalid++;
+      } else {
+        employees_saved++;
+      }
+    }
+
+    // ✅ Create auth users for non-existing emails
     let existing_kept = 0;
     let created_auth = 0;
     let auth_failed = 0;
 
     const newProfiles: any[] = [];
 
-    for (const r of employees) {
+    for (const r of cleaned) {
+      const email = r.email;
+
+      if (existingEmails.has(email)) {
+        existing_kept++;
+        continue;
+      }
+
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
-        email: r.email,
+        email,
         password: "NEW12345",
         email_confirm: true,
         user_metadata: {
@@ -120,46 +166,47 @@ export async function POST(req: Request) {
       });
 
       if (createErr) {
-        if (isAlreadyExistsAuthError(createErr)) {
-          existing_kept++;
-        } else {
-          auth_failed++;
-        }
-      } else if (created?.user?.id) {
-        created_auth++;
-
-        // profiles row (only for NEW users)
-        newProfiles.push({
-          id: created.user.id,
-          email: r.email,
-          company,
-          company_key,
-          employee_id: r.employee_id,
-          full_name: r.full_name,
-          phone: r.phone,
-          must_change_password: true,
-          password_set: false,
-        });
+        auth_failed++;
+        continue;
       }
 
-      // ✅ avoid rate limits
-      await sleep(120);
+      const uid = created?.user?.id;
+      if (!uid) {
+        auth_failed++;
+        continue;
+      }
+
+      newProfiles.push({
+        id: uid,
+        email,
+        company,
+        company_key,
+        employee_id: r.employee_id,
+        full_name: r.full_name,
+        phone: r.phone,
+        must_change_password: true,
+        password_set: false,
+      });
+
+      created_auth++;
+      existingEmails.add(email);
     }
 
-    // ✅ 3) Bulk upsert profiles for NEW users only
-    if (newProfiles.length) {
-      const { error: profErr } = await admin.from("profiles").upsert(newProfiles, { onConflict: "id" });
+    if (newProfiles.length > 0) {
+      const { error: profErr } = await admin.from("profiles").upsert(newProfiles, {
+        onConflict: "id",
+      });
       if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 });
     }
 
     return NextResponse.json({
       ok: true,
       company_key,
-      imported: employees.length,
-      created_auth,
+      imported: employees_saved,
       existing_kept,
-      invalid,
+      created_auth,
       auth_failed,
+      invalid,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
