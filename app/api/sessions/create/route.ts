@@ -157,9 +157,9 @@ export async function POST(req: Request) {
         ends_at: ends_at_iso,
 
         // visitor fields (fixes "-" in admin)
-        visitor_name: full_name,
-        visitor_phone: phone,
-        visitor_email: email,
+        visitor_name: full_name || meta.full_name || email || null,
+        visitor_phone: phone || meta.phone || null,
+        visitor_email: email || null,
 
         // tokens (exit QR)
         entry_token,
