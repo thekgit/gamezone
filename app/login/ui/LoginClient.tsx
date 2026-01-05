@@ -15,7 +15,7 @@ export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // After login, default to /home (your active sessions page)
+  // after login, default landing page
   const next = searchParams.get("next") || "/home";
 
   const [email, setEmail] = useState("");
@@ -30,6 +30,7 @@ export default function LoginClient() {
     setLoading(true);
 
     try {
+      // 1) Login
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
@@ -40,27 +41,22 @@ export default function LoginClient() {
         return;
       }
 
-      const jwt = data.session?.access_token;
-      if (!jwt) {
-        setMsg("Login succeeded but token missing.");
+      if (!data.session) {
+        setMsg("Login succeeded but session missing.");
         return;
       }
 
-      // ✅ Check if this user must change password
-      const psRes = await fetch("/api/profile/password-set", {
-        method: "GET",
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-
-      const psData = await psRes.json().catch(() => ({}));
-
-      if (!psRes.ok) {
-        setMsg(psData?.error || "Failed to verify password status.");
+      // 2) Read user metadata directly (NO SERVER API)
+      const { data: userRes, error: uErr } = await supabase.auth.getUser();
+      if (uErr) {
+        setMsg(uErr.message);
         return;
       }
 
-      if (psData?.must_change_password === true) {
+      const mustChange = userRes.user?.user_metadata?.must_change_password === true;
+
+      // 3) Redirect
+      if (mustChange) {
         router.replace(`/set-password?next=${encodeURIComponent(next)}`);
         return;
       }
