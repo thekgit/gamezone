@@ -93,12 +93,14 @@ export default function SelectPage() {
       return;
     }
 
+    if (booking) return; // ✅ prevent double calls
+
     setBooking(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const jwt = sess?.session?.access_token;
       if (!jwt) {
-        router.replace("/login");
+        router.replace("/login?next=/select");
         return;
       }
 
@@ -136,6 +138,7 @@ export default function SelectPage() {
 
   return (
     <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
+      {/* SLOT FULL POPUP */}
       {slotFullOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b0b0b] p-5">
@@ -145,6 +148,7 @@ export default function SelectPage() {
               to free up.
             </div>
             <button
+              type="button"
               onClick={() => setSlotFullOpen(false)}
               className="mt-4 w-full rounded-xl py-3 font-semibold bg-white text-black hover:bg-white/90"
             >
@@ -160,6 +164,7 @@ export default function SelectPage() {
 
         {msg && <div className="mt-3 text-sm text-red-400">{msg}</div>}
 
+        {/* Game dropdown */}
         <div className="mt-4">
           <label className="text-xs text-white/60">Game</label>
           <select
@@ -169,7 +174,7 @@ export default function SelectPage() {
               userPickedGameRef.current = true; // ✅ lock user choice
               setGameId(e.target.value);
             }}
-            disabled={loadingGames}
+            disabled={loadingGames || booking}
           >
             {games.map((g) => (
               <option key={g.id} value={g.id}>
@@ -192,6 +197,7 @@ export default function SelectPage() {
           </div>
         </div>
 
+        {/* Players dropdown */}
         <div className="mt-4">
           <label className="text-xs text-white/60">Number of Players</label>
           <select
@@ -211,6 +217,7 @@ export default function SelectPage() {
           </select>
         </div>
 
+        {/* Book button */}
         <button
           type="button"
           onClick={bookSlot}
