@@ -18,12 +18,22 @@ function normPhone(v: any) {
   return String(v || "").replace(/\D/g, "").slice(0, 10);
 }
 
+function normalizeKey(k: string) {
+  return k
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, ""); // remove spaces, dots, hyphens
+}
+
 function pickCol(obj: Record<string, any>, keys: string[]) {
-  const lower: Record<string, string> = {};
-  Object.keys(obj).forEach((k) => (lower[k.toLowerCase().trim()] = k));
+  const normMap: Record<string, string> = {};
+
+  Object.keys(obj).forEach((k) => {
+    normMap[normalizeKey(k)] = k;
+  });
+
   for (const want of keys) {
-    const k = lower[want.toLowerCase().trim()];
-    if (k) return obj[k];
+    const nk = normalizeKey(want);
+    if (normMap[nk]) return obj[normMap[nk]];
   }
   return "";
 }
@@ -33,32 +43,43 @@ function mapAnyRowToParsed(obj: Record<string, any>): ParsedRow | null {
   const employee_id = String(
     pickCol(obj, [
       "employee id",
-      "employee_id",
+      "employeeid",
       "emp id",
       "empid",
-      "id",
-      "employeeid",
       "employee code",
-      "employee no",
+      "emp code",
+      "code",
     ])
   ).trim();
 
-  const full_name = String(pickCol(obj, ["name", "full name", "full_name", "employee name"])).trim();
+  const full_name = String(
+    pickCol(obj, ["name", "full name", "employee name"])
+  ).trim();
 
   const phone = normPhone(
-    pickCol(obj, ["mobile no.", "mobile", "mobile number", "phone", "phone no", "phone number"])
+    pickCol(obj, [
+      "mobile no",
+      "mobile",
+      "mobile number",
+      "phone",
+      "phone no",
+      "contact",
+    ])
   );
 
-  const email = normEmail(pickCol(obj, ["e-mail", "email", "mail", "email id", "emailid"]));
+  const email = normEmail(
+    pickCol(obj, [
+      "email",
+      "e-mail",
+      "email id",
+      "mail",
+      "email address",
+    ])
+  );
 
   if (!email || !employee_id) return null;
 
-  return {
-    employee_id,
-    full_name,
-    phone,
-    email,
-  };
+  return { employee_id, full_name, phone, email };
 }
 
 export default function AparUsersClient() {
