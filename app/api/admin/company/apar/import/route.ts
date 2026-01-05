@@ -41,7 +41,12 @@ export async function POST(req: Request) {
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ Load existing auth users once
+    // ✅ IMPORTANT: prevent timeouts / rate limits on large imports
+    // Each request will create max N auth users.
+    // If you upload 400 rows, your UI should call this endpoint in chunks (50 rows each).
+    const MAX_AUTH_CREATE_PER_REQUEST = 25;
+
+    // ✅ Load existing auth users ONCE (good enough for your scale)
     const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
       page: 1,
       perPage: 2000,
@@ -52,20 +57,22 @@ export async function POST(req: Request) {
     }
 
     const existingEmails = new Set<string>();
-    const emailToUserId = new Map<string, string>();
-
     for (const u of listRes?.users || []) {
       const em = (u.email || "").toLowerCase();
-      if (em) {
-        existingEmails.add(em);
-        if (u.id) emailToUserId.set(em, u.id);
-      }
+      if (em) existingEmails.add(em);
     }
 
-    let imported = 0;
-    let existing_kept = 0;
+    // ✅ 1) Clean rows -> bulk upsert employees (FAST)
+    const cleanedEmployees: {
+      company: string;
+      company_key: string;
+      employee_id: string;
+      full_name: string;
+      phone: string | null;
+      email: string;
+    }[] = [];
+
     let invalid = 0;
-    let created_auth = 0;
 
     for (const r of rows) {
       const email = normEmail(r.email);
@@ -78,57 +85,54 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const full_name = full_name_raw || employee_id; // ✅ full_name NOT NULL
+      const full_name = full_name_raw || employee_id; // DB full_name is NOT NULL
 
-      // ✅ 1) Upsert employee row
-      const { error: empErr } = await admin
-        .from("company_employees")
-        .upsert(
-          {
-            company,
-            company_key,
-            employee_id,
-            full_name,
-            phone: phone || null,
-            email,
-          },
-          { onConflict: "company_key,email" }
-        );
+      cleanedEmployees.push({
+        company,
+        company_key,
+        employee_id,
+        full_name,
+        phone: phone || null,
+        email,
+      });
+    }
 
-      if (empErr) {
-        invalid++;
-        continue;
-      }
+    if (!cleanedEmployees.length) {
+      return NextResponse.json({ error: "No valid rows to import.", invalid }, { status: 400 });
+    }
 
-      imported++;
+    // ✅ Bulk upsert employees
+    const { error: empErr } = await admin
+      .from("company_employees")
+      .upsert(cleanedEmployees, { onConflict: "company_key,email" });
 
-      // ✅ 2) If auth already exists → keep as-is, do NOT reset password
+    if (empErr) {
+      return NextResponse.json({ error: empErr.message }, { status: 500 });
+    }
+
+    // ✅ 2) Create auth users ONLY for those that don't exist yet
+    //    (limit per request to avoid timeouts)
+    let imported = cleanedEmployees.length;
+    let existing_kept = 0;
+    let created_auth = 0;
+    let skipped_auth_due_to_limit = 0;
+
+    // We'll store profiles for NEW users so password check works
+    const newProfiles: any[] = [];
+
+    for (const r of cleanedEmployees) {
+      const email = r.email;
+
       if (existingEmails.has(email)) {
         existing_kept++;
-
-        const uid = emailToUserId.get(email);
-        if (uid) {
-          // Optional: fill missing profile fields without touching must_change_password
-          await admin
-            .from("profiles")
-            .upsert(
-              {
-                id: uid,
-                email,
-                company,
-                company_key,
-                employee_id,
-                full_name,
-                phone: phone || null,
-              },
-              { onConflict: "id" }
-            );
-        }
-
         continue;
       }
 
-      // ✅ 3) Create NEW auth user
+      if (created_auth >= MAX_AUTH_CREATE_PER_REQUEST) {
+        skipped_auth_due_to_limit++;
+        continue;
+      }
+
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
         password: "NEW12345",
@@ -137,13 +141,14 @@ export async function POST(req: Request) {
           must_change_password: true,
           company,
           company_key,
-          employee_id,
-          full_name,
-          phone: phone || null,
+          employee_id: r.employee_id,
+          full_name: r.full_name,
+          phone: r.phone,
         },
       });
 
       if (createErr) {
+        // keep going; don't fail entire import
         invalid++;
         continue;
       }
@@ -154,45 +159,49 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // ✅ 4) Force set-password for NEW users via profiles
-      const { error: profErr } = await admin
-        .from("profiles")
-        .upsert(
-          {
-            id: uid,
-            email,
-            company,
-            company_key,
-            employee_id,
-            full_name,
-            phone: phone || null,
-            must_change_password: true,
-            password_set: false,
-          },
-          { onConflict: "id" }
-        );
-
-      if (profErr) {
-        invalid++;
-        continue;
-      }
+      // ✅ Profile row used by /api/profile/password-set
+      newProfiles.push({
+        id: uid,
+        email,
+        company,
+        company_key,
+        employee_id: r.employee_id,
+        full_name: r.full_name,
+        phone: r.phone,
+        must_change_password: true,
+        password_set: false,
+      });
 
       created_auth++;
       existingEmails.add(email);
-      emailToUserId.set(email, uid);
+    }
+
+    // ✅ Bulk upsert profiles for NEW users only (fast)
+    if (newProfiles.length > 0) {
+      const { error: profErr } = await admin
+        .from("profiles")
+        .upsert(newProfiles, { onConflict: "id" });
+
+      if (profErr) {
+        return NextResponse.json({ error: profErr.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({
       ok: true,
+      company_key,
       imported,
       existing_kept,
-      invalid,
       created_auth,
+      invalid,
+      // ✅ if this is > 0, you must call import again for remaining users
+      skipped_auth_due_to_limit,
+      hint:
+        skipped_auth_due_to_limit > 0
+          ? "Auth creation limited per request. Upload in chunks (50 rows) OR call import again until skipped_auth_due_to_limit becomes 0."
+          : "Done.",
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }

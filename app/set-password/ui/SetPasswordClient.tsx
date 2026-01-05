@@ -36,7 +36,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
         return;
       }
 
-      // ✅ Set password + clear must_change_password flag
+      // ✅ update password AND clear the flag
       const { error } = await supabase.auth.updateUser({
         password,
         data: { must_change_password: false },
@@ -59,7 +59,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className="text-3xl font-bold">Set new password</h1>
           <p className="text-white/60 mt-2 text-sm">
-            This is required on your first login.
+            This is required on your first login. After saving, you’ll continue.
           </p>
         </motion.div>
 
