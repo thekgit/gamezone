@@ -1,89 +1,94 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  }
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 export default function SetPasswordPage() {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const router = useRouter();
+  const sp = useSearchParams();
+  const next = sp.get("next") || "/select";
+
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    // must be logged in from invite
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
-        const sp = new URLSearchParams(window.location.search);
-        const next = sp.get("next") || "/select";
-        window.location.replace(`/login?next=${encodeURIComponent("/set-password?next=" + next)}`);
-      }
-    })();
-  }, []);
-
-  const onSet = async () => {
+  const onSave = async () => {
     setMsg("");
-    if (!password || password.length < 6) return setMsg("Password must be at least 6 characters.");
-    if (password !== confirm) return setMsg("Passwords do not match.");
+
+    if (pw1.length < 6) {
+      setMsg("Password must be at least 6 characters.");
+      return;
+    }
+    if (pw1 !== pw2) {
+      setMsg("Passwords do not match.");
+      return;
+    }
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) return setMsg(error.message);
+      // must be logged in already
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess?.session) {
+        router.replace("/login");
+        return;
+      }
 
-      const sp = new URLSearchParams(window.location.search);
-      const next = sp.get("next") || "/select";
-      window.location.replace(next);
+      const { error } = await supabase.auth.updateUser({
+        password: pw1,
+        data: { must_change_password: false }, // ✅ clear flag
+      });
+
+      if (error) {
+        setMsg(error.message);
+        return;
+      }
+
+      router.replace(next);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-5">
-        <h1 className="text-2xl font-bold">Set Password</h1>
-        <p className="text-white/60 text-sm mt-2">
-          Create your new password to continue.
+    <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6">
+        <h1 className="text-2xl font-bold">Create New Password</h1>
+        <p className="text-white/60 text-sm mt-1">
+          This is required on your first login.
         </p>
 
-        <div className="mt-4 space-y-3">
+        <div className="mt-5 space-y-3">
           <input
             className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
             placeholder="New password"
             type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={pw1}
+            onChange={(e) => setPw1(e.target.value)}
           />
           <input
             className="w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-            placeholder="Confirm password"
+            placeholder="Confirm new password"
             type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
+            value={pw2}
+            onChange={(e) => setPw2(e.target.value)}
           />
         </div>
 
         {msg && <div className="mt-3 text-sm text-red-300">{msg}</div>}
 
         <button
-          onClick={onSet}
+          onClick={onSave}
           disabled={loading}
-          className="mt-5 w-full rounded-xl bg-white text-black py-3 font-semibold disabled:opacity-40"
+          className="w-full mt-5 rounded-xl py-3 font-semibold bg-white text-black disabled:opacity-40"
         >
-          {loading ? "Saving..." : "Save & Continue"}
+          {loading ? "Saving..." : "Save Password"}
         </button>
       </div>
     </main>
