@@ -9,8 +9,14 @@ function token(len = 12) {
   return crypto.randomBytes(len).toString("hex");
 }
 
-function getNowIso() {
+function nowIso() {
   return new Date().toISOString();
+}
+
+function addMinutesIso(iso: string, mins: number) {
+  const d = new Date(iso);
+  d.setMinutes(d.getMinutes() + mins);
+  return d.toISOString();
 }
 
 export async function POST(req: Request) {
@@ -30,14 +36,17 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // resolve user
+    // ✅ resolve user once
     const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
     if (userErr || !userRes?.user?.id) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
-    const user_id = userRes.user.id;
 
-    // resolve game
+    const user = userRes.user;
+    const user_id = user.id;
+    const email = (user.email || "").toLowerCase();
+
+    // ✅ resolve game
     let gameRow: any = null;
 
     if (game_id_from_client) {
@@ -49,11 +58,11 @@ export async function POST(req: Request) {
       if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
       gameRow = g;
     } else if (game_legacy) {
-      // try by key
+      // try by key (if you have it)
       const { data: g1 } = await admin
         .from("games")
         .select("id, name, duration_minutes, court_count, is_active")
-        // @ts-ignore key exists in your schema
+        // @ts-ignore: if column exists
         .eq("key", game_legacy)
         .maybeSingle();
 
@@ -72,38 +81,69 @@ export async function POST(req: Request) {
     }
 
     if (!gameRow?.id) return NextResponse.json({ error: "Game not found" }, { status: 400 });
-    if (gameRow.is_active === false) return NextResponse.json({ error: "Game is not active" }, { status: 400 });
+    if (gameRow.is_active === false) {
+      return NextResponse.json({ error: "Game is not active" }, { status: 400 });
+    }
 
     const game_id = gameRow.id;
+    const duration_minutes = Number(gameRow.duration_minutes ?? 60);
+    const capacity = Math.max(1, Number(gameRow.court_count ?? 1));
 
-    // capacity check from DB (court_count)
-    const nowIso = getNowIso();
-    const capacity = Number(gameRow.court_count ?? 1);
+    // ✅ compute started/ends ISO (fixes your red lines)
+    const started_at_iso = nowIso();
+    const ends_at_iso = addMinutesIso(started_at_iso, duration_minutes);
 
-    const { count, error: cErr } = await admin
+    // ✅ capacity check: active sessions for this game "now"
+    const { count: activeCount, error: countErr } = await admin
       .from("sessions")
       .select("id", { count: "exact", head: true })
       .eq("game_id", game_id)
-      .eq("status", "active")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+      .or("status.eq.active,status.is.null") // treat null as active (optional)
+      .is("ended_at", null)
+      .gt("ends_at", started_at_iso); // still running
 
-    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
-    if ((count || 0) >= capacity) return NextResponse.json({ error: "SLOT_FULL" }, { status: 400 });
+    if (countErr) return NextResponse.json({ error: countErr.message }, { status: 500 });
 
-    const durationMinutes = Number(gameRow.duration_minutes ?? 60);
-    const started_at = new Date();
-    const ends_at = new Date(started_at.getTime() + durationMinutes * 60 * 1000);
+    if ((activeCount ?? 0) >= capacity) {
+      return NextResponse.json({ error: "SLOT_FULL" }, { status: 409 });
+    }
 
-    const entry_token = token(12);
-    const exit_token = token(12);
+    // ✅ get visitor fields (so admin shows details)
+    let full_name: string | null = null;
+    let phone: string | null = null;
 
-    // profile info
-    const { data: p } = await admin
+    // A) profiles (if exists)
+    const { data: prof } = await admin
       .from("profiles")
-      .select("full_name, phone, email")
-      .eq("user_id", user_id)
+      .select("full_name, phone")
+      .eq("id", user_id)
       .maybeSingle();
 
+    if (prof?.full_name) full_name = prof.full_name;
+    if (prof?.phone) phone = prof.phone;
+
+    // B) company_employees fallback (imported users)
+    if (!full_name || !phone) {
+      const { data: emp } = await admin
+        .from("company_employees")
+        .select("full_name, phone")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (!full_name && emp?.full_name) full_name = emp.full_name;
+      if (!phone && emp?.phone) phone = emp.phone;
+    }
+
+    // C) auth metadata fallback
+    const meta: any = user.user_metadata || {};
+    if (!full_name && meta.full_name) full_name = String(meta.full_name);
+    if (!phone && meta.phone) phone = String(meta.phone);
+
+    // ✅ tokens used for entry/exit flow
+    const entry_token = token(16);
+    const exit_token = token(16);
+
+    // ✅ insert session
     const { data: created, error: insErr } = await admin
       .from("sessions")
       .insert({
@@ -112,25 +152,27 @@ export async function POST(req: Request) {
         players,
         status: "active",
 
-        started_at: started_at.toISOString(),
-        ends_at: ends_at.toISOString(),
+        // booking window
+        started_at: started_at_iso,
+        ends_at: ends_at_iso,
 
-        start_time: started_at.toISOString(),
-        end_time: ends_at.toISOString(),
+        // visitor fields (fixes "-" in admin)
+        visitor_name: full_name,
+        visitor_phone: phone,
+        visitor_email: email,
 
+        // tokens (exit QR)
         entry_token,
         exit_token,
-
-        visitor_name: p?.full_name ?? null,
-        visitor_phone: p?.phone ?? null,
-        visitor_email: p?.email ?? null,
       })
       .select("id, entry_token, exit_token")
       .single();
 
-    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
+    if (insErr) {
+      return NextResponse.json({ error: insErr.message }, { status: 500 });
+    }
 
-    // IMPORTANT: keep response stable for your UI
+    // ✅ stable response for your UI
     return NextResponse.json({
       ok: true,
       message: "Slot has been created successfully",
