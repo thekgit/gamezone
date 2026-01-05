@@ -15,7 +15,7 @@ export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // ✅ after login we want Active Sessions page (NOT /select)
+  // Default landing after login (your app uses /home as the main page)
   const next = searchParams.get("next") || "/home";
 
   const [email, setEmail] = useState("");
@@ -28,42 +28,56 @@ export default function LoginClient() {
   const handleLogin = async () => {
     setMsg("");
     setLoading(true);
-  
+
     try {
-      const cleanEmail = email.trim().toLowerCase();
-  
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
+        email: email.trim().toLowerCase(),
         password,
       });
-  
+
       if (error) {
         setMsg(error.message);
         return;
       }
-  
-      // ✅ Check if user MUST change password (only for NEW12345 users)
-      const mustChange = !!data?.user?.user_metadata?.must_change_password;
-  
-      if (mustChange) {
-        router.replace(`/set-password?next=${encodeURIComponent("/home")}`);
+
+      const jwt = data.session?.access_token;
+      if (!jwt) {
+        setMsg("Login succeeded but token missing.");
         return;
       }
-  
-      // ✅ Normal users -> go to /home (Active sessions page)
-      router.replace(next || "/home");
+
+      // ✅ IMPORTANT: check if this user must change password
+      const ps = await fetch("/api/profile/password-set", {
+        method: "GET",
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+        },
+      });
+
+      const psData = await ps.json().catch(() => ({}));
+
+      if (!ps.ok) {
+        // If this fails, be safe: DO NOT silently skip password change check
+        setMsg(psData?.error || "Failed to verify password status.");
+        return;
+      }
+
+      if (psData?.must_change_password === true) {
+        router.replace(`/set-password?next=${encodeURIComponent(next)}`);
+        return;
+      }
+
+      router.replace(next);
     } finally {
       setLoading(false);
     }
   };
+
   return (
     <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
       <div className="w-full max-w-sm">
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
-        >
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className="text-3xl font-bold">Login</h1>
           <p className="text-white/60 mt-2 text-sm">Use your email + password.</p>
         </motion.div>
@@ -76,7 +90,6 @@ export default function LoginClient() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-
           <input
             className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
             placeholder="Password"
