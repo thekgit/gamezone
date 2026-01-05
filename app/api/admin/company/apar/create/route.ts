@@ -37,14 +37,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ full_name is NOT NULL in DB
     const full_name = full_name_raw || employee_id;
 
     const admin = supabaseAdmin();
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ 1) Upsert employee row (this table stores all details)
+    // ✅ 1) Upsert employee row
     const { error: empErr } = await admin
       .from("company_employees")
       .upsert(
@@ -77,7 +76,6 @@ export async function POST(req: Request) {
     );
 
     if (existing?.id) {
-      // ✅ Existing user: keep as-is, do NOT touch profiles flags
       return NextResponse.json({
         ok: true,
         created_auth: false,
@@ -108,16 +106,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "User id missing after create" }, { status: 500 });
     }
 
-    // ✅ 4) PROFILES: store ONLY flags (NO company_key etc)
+    // ✅ 4) PROFILES: store ONLY flags, keyed by user_id (NOT id)
     const { error: profErr } = await admin
       .from("profiles")
       .upsert(
         {
-          id: uid,
+          user_id: uid,
           must_change_password: true,
           password_set: false,
         },
-        { onConflict: "id" }
+        { onConflict: "user_id" }
       );
 
     if (profErr) {

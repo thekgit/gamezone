@@ -95,7 +95,7 @@ export async function POST(req: Request) {
 
     if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
 
-    // ✅ 2) Create auth users for new emails + create profile flags ONLY
+    // ✅ 2) Create auth users for NEW emails + create profile flags
     const MAX_AUTH_CREATE_PER_REQUEST = 25;
 
     let imported = cleanedEmployees.length;
@@ -103,7 +103,9 @@ export async function POST(req: Request) {
     let created_auth = 0;
     let skipped_auth_due_to_limit = 0;
 
-    const newProfiles: { id: string; must_change_password: boolean; password_set: boolean }[] = [];
+    // ✅ profiles table PK is user_id
+    const newProfiles: { user_id: string; must_change_password: boolean; password_set: boolean }[] =
+      [];
 
     for (const r of cleanedEmployees) {
       const email = r.email;
@@ -142,9 +144,9 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // ✅ PROFILES: store ONLY flags (no company_key/company/email etc)
+      // ✅ PROFILES: store ONLY flags, keyed by user_id
       newProfiles.push({
-        id: uid,
+        user_id: uid,
         must_change_password: true,
         password_set: false,
       });
@@ -155,7 +157,7 @@ export async function POST(req: Request) {
 
     if (newProfiles.length > 0) {
       const { error: profErr } = await admin.from("profiles").upsert(newProfiles, {
-        onConflict: "id",
+        onConflict: "user_id",
       });
       if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 });
     }
