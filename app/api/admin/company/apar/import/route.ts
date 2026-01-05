@@ -27,21 +27,17 @@ function normName(v: any) {
 
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const rows = Array.isArray(body?.rows) ? (body.rows as Row[]) : [];
-    if (!rows.length) {
-      return NextResponse.json({ error: "No rows received." }, { status: 400 });
-    }
+    if (!rows.length) return NextResponse.json({ error: "No rows received." }, { status: 400 });
 
     const admin = supabaseAdmin();
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ Load existing auth users (we need email existence)
+    // ✅ Load existing auth users ONCE
     const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
       page: 1,
       perPage: 2000,
@@ -54,8 +50,8 @@ export async function POST(req: Request) {
       if (em) existingEmails.add(em);
     }
 
-    // ✅ Clean rows
-    const cleaned: {
+    // ✅ 1) Clean rows -> bulk upsert employees
+    const cleanedEmployees: {
       company: string;
       company_key: string;
       employee_id: string;
@@ -77,9 +73,9 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const full_name = full_name_raw || employee_id;
+      const full_name = full_name_raw || employee_id; // DB full_name NOT NULL
 
-      cleaned.push({
+      cleanedEmployees.push({
         company,
         company_key,
         employee_id,
@@ -89,65 +85,36 @@ export async function POST(req: Request) {
       });
     }
 
-    if (!cleaned.length) {
+    if (!cleanedEmployees.length) {
       return NextResponse.json({ error: "No valid rows to import.", invalid }, { status: 400 });
     }
 
-    // ✅ Save employees
-    // We CANNOT safely bulk upsert on only (company_key,email) because employee_id is also unique.
-    // So we do it row-by-row but still fast enough (50 rows per request from UI).
-    let employees_saved = 0;
-    for (const r of cleaned) {
-      const { error: upErr } = await admin
-        .from("company_employees")
-        .upsert(
-          {
-            company: r.company,
-            company_key: r.company_key,
-            employee_id: r.employee_id,
-            full_name: r.full_name,
-            phone: r.phone,
-            email: r.email,
-          },
-          { onConflict: "company_key,email" }
-        );
+    const { error: empErr } = await admin
+      .from("company_employees")
+      .upsert(cleanedEmployees, { onConflict: "company_key,email" });
 
-      if (!upErr) {
-        employees_saved++;
-        continue;
-      }
+    if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
 
-      // If employee_id unique blocks, fallback: update by employee_id instead
-      // (keeps the record correct even if email changed)
-      const { error: updErr } = await admin
-        .from("company_employees")
-        .update({
-          full_name: r.full_name,
-          phone: r.phone,
-          email: r.email,
-        })
-        .eq("company_key", company_key)
-        .eq("employee_id", r.employee_id);
+    // ✅ 2) Create auth users for new emails + create profile flags ONLY
+    const MAX_AUTH_CREATE_PER_REQUEST = 25;
 
-      if (updErr) {
-        invalid++;
-      } else {
-        employees_saved++;
-      }
-    }
-
-    // ✅ Create auth users for non-existing emails
+    let imported = cleanedEmployees.length;
     let existing_kept = 0;
     let created_auth = 0;
-    let auth_failed = 0;
+    let skipped_auth_due_to_limit = 0;
 
-    const newProfiles: any[] = [];
+    const newProfiles: { id: string; must_change_password: boolean; password_set: boolean }[] = [];
 
-    for (const r of cleaned) {
+    for (const r of cleanedEmployees) {
       const email = r.email;
 
       if (existingEmails.has(email)) {
         existing_kept++;
+        continue;
+      }
+
+      if (created_auth >= MAX_AUTH_CREATE_PER_REQUEST) {
+        skipped_auth_due_to_limit++;
         continue;
       }
 
@@ -157,7 +124,6 @@ export async function POST(req: Request) {
         email_confirm: true,
         user_metadata: {
           must_change_password: true,
-          company,
           company_key,
           employee_id: r.employee_id,
           full_name: r.full_name,
@@ -166,24 +132,19 @@ export async function POST(req: Request) {
       });
 
       if (createErr) {
-        auth_failed++;
+        invalid++;
         continue;
       }
 
       const uid = created?.user?.id;
       if (!uid) {
-        auth_failed++;
+        invalid++;
         continue;
       }
 
+      // ✅ PROFILES: store ONLY flags (no company_key/company/email etc)
       newProfiles.push({
         id: uid,
-        email,
-        company,
-        company_key,
-        employee_id: r.employee_id,
-        full_name: r.full_name,
-        phone: r.phone,
         must_change_password: true,
         password_set: false,
       });
@@ -201,12 +162,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      company_key,
-      imported: employees_saved,
+      imported,
       existing_kept,
       created_auth,
-      auth_failed,
       invalid,
+      skipped_auth_due_to_limit,
+      hint:
+        skipped_auth_due_to_limit > 0
+          ? "Auth creation limited per request. Upload in chunks (50 rows) OR click Import again until skipped_auth_due_to_limit becomes 0."
+          : "Done.",
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });

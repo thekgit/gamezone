@@ -41,11 +41,10 @@ export async function POST(req: Request) {
     const full_name = full_name_raw || employee_id;
 
     const admin = supabaseAdmin();
-
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ 1) Upsert employee row (matches your table columns)
+    // ✅ 1) Upsert employee row (this table stores all details)
     const { error: empErr } = await admin
       .from("company_employees")
       .upsert(
@@ -78,24 +77,7 @@ export async function POST(req: Request) {
     );
 
     if (existing?.id) {
-      // ✅ Existing user: keep password as-is; do NOT force set-password
-      // Optional: fill missing profile fields without breaking them
-      await admin
-        .from("profiles")
-        .upsert(
-          {
-            id: existing.id,
-            email,
-            company,
-            company_key,
-            employee_id,
-            full_name,
-            phone: phone || null,
-            // do NOT touch must_change_password/password_set for existing
-          },
-          { onConflict: "id" }
-        );
-
+      // ✅ Existing user: keep as-is, do NOT touch profiles flags
       return NextResponse.json({
         ok: true,
         created_auth: false,
@@ -103,14 +85,13 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ 3) Create NEW auth user with default password + must_change_password
+    // ✅ 3) Create NEW auth user with default password
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,
       password: "NEW12345",
       email_confirm: true,
       user_metadata: {
         must_change_password: true,
-        company,
         company_key,
         employee_id,
         full_name,
@@ -127,18 +108,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "User id missing after create" }, { status: 500 });
     }
 
-    // ✅ 4) Also store in profiles so your password detection works reliably
+    // ✅ 4) PROFILES: store ONLY flags (NO company_key etc)
     const { error: profErr } = await admin
       .from("profiles")
       .upsert(
         {
           id: uid,
-          email,
-          company,
-          company_key,
-          employee_id,
-          full_name,
-          phone: phone || null,
           must_change_password: true,
           password_set: false,
         },
