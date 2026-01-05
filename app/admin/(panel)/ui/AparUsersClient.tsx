@@ -21,7 +21,6 @@ function normPhone(v: any) {
 function pickCol(obj: Record<string, any>, keys: string[]) {
   const lower: Record<string, string> = {};
   Object.keys(obj).forEach((k) => (lower[k.toLowerCase().trim()] = k));
-
   for (const want of keys) {
     const k = lower[want.toLowerCase().trim()];
     if (k) return obj[k];
@@ -32,10 +31,19 @@ function pickCol(obj: Record<string, any>, keys: string[]) {
 // ✅ map sheet headers to your needed fields
 function mapAnyRowToParsed(obj: Record<string, any>): ParsedRow | null {
   const employee_id = String(
-    pickCol(obj, ["employee id", "employee_id", "emp id", "empid", "id", "employeeid"])
+    pickCol(obj, [
+      "employee id",
+      "employee_id",
+      "emp id",
+      "empid",
+      "id",
+      "employeeid",
+      "employee code",
+      "employee no",
+    ])
   ).trim();
 
-  const full_name = String(pickCol(obj, ["name", "full name", "full_name"])).trim();
+  const full_name = String(pickCol(obj, ["name", "full name", "full_name", "employee name"])).trim();
 
   const phone = normPhone(
     pickCol(obj, ["mobile no.", "mobile", "mobile number", "phone", "phone no", "phone number"])
@@ -43,25 +51,22 @@ function mapAnyRowToParsed(obj: Record<string, any>): ParsedRow | null {
 
   const email = normEmail(pickCol(obj, ["e-mail", "email", "mail", "email id", "emailid"]));
 
-  // minimum required: email + employee_id
   if (!email || !employee_id) return null;
 
-  return { employee_id, full_name, phone, email };
-}
-
-function chunk<T>(arr: T[], size: number) {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+  return {
+    employee_id,
+    full_name,
+    phone,
+    email,
+  };
 }
 
 export default function AparUsersClient() {
   const [parsed, setParsed] = useState<ParsedRow[]>([]);
   const [msg, setMsg] = useState("");
-
   const [busy, setBusy] = useState(false);
 
-  // progress state for big imports
+  // progress
   const [importing, setImporting] = useState(false);
   const [progressText, setProgressText] = useState("");
   const [progressPct, setProgressPct] = useState(0);
@@ -89,13 +94,17 @@ export default function AparUsersClient() {
     try {
       if (ext === "csv") {
         const text = await file.text();
-        const res = Papa.parse<Record<string, any>>(text, { header: true, skipEmptyLines: true });
+        const res = Papa.parse<Record<string, any>>(text, {
+          header: true,
+          skipEmptyLines: true,
+        });
 
         const rows = (res.data || [])
           .map(mapAnyRowToParsed)
           .filter(Boolean) as ParsedRow[];
 
         setParsed(rows);
+        setMsg(`✅ Parsed ${rows.length} valid rows from CSV.`);
         return;
       }
 
@@ -108,88 +117,80 @@ export default function AparUsersClient() {
 
       const rows = (json || []).map(mapAnyRowToParsed).filter(Boolean) as ParsedRow[];
       setParsed(rows);
+      setMsg(`✅ Parsed ${rows.length} valid rows from Excel.`);
     } catch (e: any) {
       setMsg(e?.message || "Failed to parse file");
     }
   };
 
+  // ✅ Chunked import (50 rows each) + progress + cancel
   const importUsers = async () => {
     setMsg("");
-    setProgressText("");
-    setProgressPct(0);
-    cancelRef.current = false;
-
     if (parsed.length === 0) {
       setMsg("No valid rows found. Need at least Employee ID + Email.");
       return;
     }
 
-    // ✅ chunk size: 50 is safe for Vercel/serverless
-    const CHUNK_SIZE = 50;
-    const groups = chunk(parsed, CHUNK_SIZE);
-
+    cancelRef.current = false;
     setBusy(true);
     setImporting(true);
+    setProgressPct(0);
 
-    // totals
-    let total_imported = 0;
-    let total_existing_kept = 0;
-    let total_created_auth = 0;
-    let total_invalid = 0;
-    let total_skipped_auth_due_to_limit = 0;
+    const CHUNK = 50;
+
+    let totalImported = 0;
+    let totalCreated = 0;
+    let totalExisting = 0;
+    let totalInvalid = 0;
+    let totalAuthFailed = 0;
 
     try {
-      for (let i = 0; i < groups.length; i++) {
+      for (let i = 0; i < parsed.length; i += CHUNK) {
         if (cancelRef.current) {
-          setMsg("⚠️ Import cancelled by admin.");
-          break;
+          setMsg("⚠️ Import cancelled.");
+          return;
         }
 
-        const part = groups[i];
-        const label = `Uploading batch ${i + 1}/${groups.length} (${part.length} rows)`;
-        setProgressText(label);
-        setProgressPct(Math.round(((i + 1) / groups.length) * 100));
+        const chunk = parsed.slice(i, i + CHUNK);
+
+        const done = Math.min(i + CHUNK, parsed.length);
+        const pct = Math.round((done / parsed.length) * 100);
+
+        setProgressText(`Uploading ${done} / ${parsed.length} ...`);
+        setProgressPct(pct);
 
         const res = await fetch("/api/admin/company/apar/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: part }),
+          body: JSON.stringify({ rows: chunk }),
         });
 
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          setMsg(data?.error || `Import failed (batch ${i + 1})`);
+          setMsg(data?.error || `Import failed (${res.status})`);
           return;
         }
 
-        // ✅ match your new API response keys
-        total_imported += Number(data?.imported ?? 0);
-        total_existing_kept += Number(data?.existing_kept ?? 0);
-        total_created_auth += Number(data?.created_auth ?? 0);
-        total_invalid += Number(data?.invalid ?? 0);
-        total_skipped_auth_due_to_limit += Number(data?.skipped_auth_due_to_limit ?? 0);
-
-        // If server says it hit auth-create limit, we still continue because we are chunking already.
+        totalImported += Number(data?.imported || 0);
+        totalCreated += Number(data?.created_auth || 0);
+        totalExisting += Number(data?.existing_kept || 0);
+        totalInvalid += Number(data?.invalid || 0);
+        totalAuthFailed += Number(data?.auth_failed || 0);
       }
 
       setMsg(
         [
-          "✅ Import complete.",
-          `• Employees upserted: ${total_imported}`,
-          `• Existing users kept: ${total_existing_kept}`,
-          `• New auth created: ${total_created_auth}`,
-          `• Invalid/skipped rows: ${total_invalid}`,
-          total_skipped_auth_due_to_limit > 0
-            ? `• Skipped auth due to per-request limit: ${total_skipped_auth_due_to_limit} (re-run import for remaining)`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n")
+          "✅ Import complete",
+          `• Employees saved: ${totalImported}`,
+          `• New auth created: ${totalCreated}`,
+          `• Existing kept: ${totalExisting}`,
+          `• Invalid rows: ${totalInvalid}`,
+          `• Auth failed: ${totalAuthFailed}`,
+        ].join("\n")
       );
 
-      // ✅ clear file preview after success
-      if (!cancelRef.current) setParsed([]);
+      setParsed([]);
     } finally {
       setBusy(false);
       setImporting(false);
@@ -260,7 +261,6 @@ export default function AparUsersClient() {
         </div>
       )}
 
-      {/* IMPORT + MANUAL */}
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         {/* IMPORT */}
         <div className="rounded-xl border border-white/10 bg-black/30 p-4">
@@ -284,7 +284,6 @@ export default function AparUsersClient() {
             Preview rows found: <span className="text-white font-semibold">{previewCount}</span>
           </div>
 
-          {/* Progress UI */}
           {importing && (
             <div className="mt-3">
               <div className="text-xs text-white/70">{progressText || "Importing..."}</div>
