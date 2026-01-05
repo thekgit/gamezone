@@ -10,11 +10,10 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function SetPasswordPage() {
+export default function SetPasswordClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // ✅ after password set, go to Active Sessions page
   const next = sp.get("next") || "/home";
 
   const [password, setPassword] = useState("");
@@ -31,19 +30,34 @@ export default function SetPasswordPage() {
     setLoading(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) {
+      const jwt = sess?.session?.access_token;
+
+      if (!jwt) {
         router.replace("/login");
         return;
       }
 
-      // ✅ set password + clear metadata flag
-      const { error } = await supabase.auth.updateUser({
+      // ✅ 1) Update Supabase Auth password
+      const { error: upErr } = await supabase.auth.updateUser({
         password,
         data: { must_change_password: false },
       });
 
-      if (error) {
-        setMsg(error.message);
+      if (upErr) {
+        setMsg(upErr.message);
+        return;
+      }
+
+      // ✅ 2) Mark password_set = true in your profiles (source of truth)
+      const done = await fetch("/api/profile/password-set", {
+        method: "POST",
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+
+      const doneData = await done.json().catch(() => ({}));
+      if (!done.ok) {
+        setMsg(doneData?.error || "Password saved, but failed to update profile flags.");
         return;
       }
 
@@ -59,7 +73,7 @@ export default function SetPasswordPage() {
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className="text-3xl font-bold">Set new password</h1>
           <p className="text-white/60 mt-2 text-sm">
-            This is required on your first login. After saving, you’ll continue to your dashboard.
+            This is required on your first login. After saving, you’ll continue.
           </p>
         </motion.div>
 

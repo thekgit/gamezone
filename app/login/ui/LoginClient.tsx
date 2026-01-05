@@ -15,7 +15,6 @@ export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Default landing after login (your app uses /home as the main page)
   const next = searchParams.get("next") || "/home";
 
   const [email, setEmail] = useState("");
@@ -46,24 +45,23 @@ export default function LoginClient() {
         return;
       }
 
-      // ✅ IMPORTANT: check if this user must change password
+      // ✅ MUST check whether password must be changed
       const ps = await fetch("/api/profile/password-set", {
         method: "GET",
         cache: "no-store",
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-        },
+        headers: { Authorization: `Bearer ${jwt}` },
       });
 
       const psData = await ps.json().catch(() => ({}));
 
       if (!ps.ok) {
-        // If this fails, be safe: DO NOT silently skip password change check
         setMsg(psData?.error || "Failed to verify password status.");
         return;
       }
 
-      if (psData?.must_change_password === true) {
+      const mustChange = psData?.must_change_password === true;
+
+      if (mustChange) {
         router.replace(`/set-password?next=${encodeURIComponent(next)}`);
         return;
       }
