@@ -5,32 +5,17 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type CreateBody = {
-  employee_id: string;
-  full_name: string;
-  phone: string;
-  email: string;
-};
-
-function cleanEmail(v: unknown) {
+function normEmail(v: any) {
   return String(v || "").trim().toLowerCase();
 }
-
-function cleanPhone(v: unknown) {
+function normPhone(v: any) {
   return String(v || "").replace(/\D/g, "").slice(0, 10);
 }
-
-function cleanText(v: unknown) {
+function normEmp(v: any) {
   return String(v || "").trim();
 }
-
-async function findAuthUserIdByEmail(admin: ReturnType<typeof supabaseAdmin>, email: string) {
-  // ✅ supabase-js v2: listUsers has NO email filter. Fetch and filter locally.
-  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-
-  const found = data.users.find((u) => (u.email || "").toLowerCase() === email);
-  return found?.id || null;
+function normName(v: any) {
+  return String(v || "").trim();
 }
 
 export async function POST(req: Request) {
@@ -39,70 +24,113 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as Partial<CreateBody>;
+    const body = await req.json().catch(() => ({}));
+    const employee_id = normEmp(body.employee_id);
+    const full_name = normName(body.full_name);
+    const phone = normPhone(body.phone);
+    const email = normEmail(body.email);
 
-    const company_key = "apar";
-
-    const employee_id = cleanText(body.employee_id);
-    const full_name = cleanText(body.full_name);
-    const phone = cleanPhone(body.phone);
-    const email = cleanEmail(body.email);
-
-    if (!employee_id) return NextResponse.json({ error: "employee_id is required" }, { status: 400 });
-    if (!full_name) return NextResponse.json({ error: "full_name is required" }, { status: 400 });
-    if (!/^\d{10}$/.test(phone)) return NextResponse.json({ error: "phone must be 10 digits" }, { status: 400 });
-    if (!email || !email.includes("@")) return NextResponse.json({ error: "valid email is required" }, { status: 400 });
+    if (!employee_id || !email) {
+      return NextResponse.json(
+        { error: "Employee ID and Email are required." },
+        { status: 400 }
+      );
+    }
 
     const admin = supabaseAdmin();
+    const company_key = "apar";
 
-    // 1) Upsert into your company employees table (create this table if not exists)
-    const { error: upErr } = await admin
-    .from("company_employees")
-    .upsert(
-      {
-        company_key: "apar",
-        employee_id,
-        full_name,
-        phone,
-        email,
-      },
-      {
-        onConflict: "company_key,email",
-      }
-    );
-    if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
-
-    // 2) Ensure Supabase Auth user exists (default password NEW12345 only if new user)
-    const existingUserId = await findAuthUserIdByEmail(admin, email);
-
-    if (!existingUserId) {
-      const { data: created, error: createErr } = await admin.auth.admin.createUser({
-        email,
-        password: "NEW12345",
-        email_confirm: true,
-        user_metadata: {
+    // ✅ 1) Upsert into company_employees (send BOTH company + company_key)
+    const { error: empErr } = await admin
+      .from("company_employees")
+      .upsert(
+        {
           company_key,
+          company: company_key, // ✅ fixes NOT NULL constraint
           employee_id,
-          full_name,
-          phone,
-          temp_password: true, // your login flow can force password change if this is true
+          full_name: full_name || null,
+          phone: phone || null,
+          email,
         },
-      });
+        { onConflict: "company_key,email" } // ✅ matches your UNIQUE
+      );
 
-      if (createErr) return NextResponse.json({ error: createErr.message }, { status: 500 });
+    if (empErr) {
+      return NextResponse.json({ error: empErr.message }, { status: 500 });
+    }
+
+    // ✅ 2) If Auth user already exists → DO NOT change password
+    const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 200,
+    });
+    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
+
+    const existing = (listRes?.users || []).find(
+      (u) => (u.email || "").toLowerCase() === email
+    );
+
+    if (existing?.id) {
+      // optional: ensure profile row exists, but do not force password change
+      await admin.from("profiles").upsert(
+        {
+          id: existing.id,
+          email,
+          company: company_key,
+          employee_id,
+          full_name: full_name || null,
+          phone: phone || null,
+          // DO NOT set must_change_password for existing users
+        },
+        { onConflict: "id" }
+      );
 
       return NextResponse.json({
         ok: true,
-        created_new_auth_user: true,
-        user_id: created.user?.id || null,
+        created_auth: false,
+        message: "User already exists. Kept as-is.",
       });
     }
 
-    // user already existed -> don’t touch their password
+    // ✅ 3) Create Auth user with default password
+    const { data: createdUser, error: createErr } =
+      await admin.auth.admin.createUser({
+        email,
+        password: "NEW12345",
+        email_confirm: true,
+      });
+
+    if (createErr) {
+      return NextResponse.json({ error: createErr.message }, { status: 500 });
+    }
+
+    const uid = createdUser?.user?.id;
+    if (!uid) {
+      return NextResponse.json({ error: "User id missing after create" }, { status: 500 });
+    }
+
+    // ✅ 4) Create profile and force password change only for NEW users
+    const { error: profErr } = await admin.from("profiles").upsert(
+      {
+        id: uid,
+        email,
+        company: company_key,
+        employee_id,
+        full_name: full_name || null,
+        phone: phone || null,
+        must_change_password: true,
+      },
+      { onConflict: "id" }
+    );
+
+    if (profErr) {
+      return NextResponse.json({ error: profErr.message }, { status: 500 });
+    }
+
     return NextResponse.json({
       ok: true,
-      created_new_auth_user: false,
-      user_id: existingUserId,
+      created_auth: true,
+      message: "Created user with default password NEW12345.",
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });

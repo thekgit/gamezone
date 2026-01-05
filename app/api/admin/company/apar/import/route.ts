@@ -5,35 +5,24 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type ImportRow = {
+type Row = {
   employee_id: string;
-  full_name: string;
-  phone: string;
+  full_name?: string;
+  phone?: string;
   email: string;
 };
 
-type ImportBody = {
-  rows: ImportRow[];
-};
-
-function cleanEmail(v: unknown) {
+function normEmail(v: any) {
   return String(v || "").trim().toLowerCase();
 }
-
-function cleanPhone(v: unknown) {
+function normPhone(v: any) {
   return String(v || "").replace(/\D/g, "").slice(0, 10);
 }
-
-function cleanText(v: unknown) {
+function normEmp(v: any) {
   return String(v || "").trim();
 }
-
-async function findAuthUserIdByEmail(admin: ReturnType<typeof supabaseAdmin>, email: string) {
-  const { data, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  if (error) throw error;
-
-  const found = data.users.find((u) => (u.email || "").toLowerCase() === email);
-  return found?.id || null;
+function normName(v: any) {
+  return String(v || "").trim();
 }
 
 export async function POST(req: Request) {
@@ -42,93 +31,125 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as Partial<ImportBody>;
-    const inputRows = Array.isArray(body.rows) ? body.rows : [];
+    const body = await req.json().catch(() => ({}));
+    const rows = Array.isArray(body?.rows) ? (body.rows as Row[]) : [];
 
-    if (inputRows.length === 0) {
-      return NextResponse.json({ error: "rows[] is required" }, { status: 400 });
+    if (!rows.length) {
+      return NextResponse.json({ error: "No rows received." }, { status: 400 });
     }
 
-    const company_key = "apar";
     const admin = supabaseAdmin();
+    const company_key = "apar";
 
-    let insertedEmployees = 0;
-    let existedEmployees = 0;
+    // ✅ Get users list once
+    const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 2000,
+    });
+    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
+
+    const existingEmails = new Map<string, string>(); // email -> uid
+    for (const u of listRes?.users || []) {
+      const em = (u.email || "").toLowerCase();
+      if (em && u.id) existingEmails.set(em, u.id);
+    }
+
+    let imported = 0;
+    let existingKept = 0;
+    let invalid = 0;
     let createdAuth = 0;
-    let existedAuth = 0;
-    const errors: { email?: string; employee_id?: string; error: string }[] = [];
 
-    for (const r of inputRows) {
-      const employee_id = cleanText(r.employee_id);
-      const full_name = cleanText(r.full_name);
-      const phone = cleanPhone(r.phone);
-      const email = cleanEmail(r.email);
+    for (const r of rows) {
+      const email = normEmail(r.email);
+      const employee_id = normEmp(r.employee_id);
+      const full_name = normName(r.full_name);
+      const phone = normPhone(r.phone);
 
-      if (!employee_id || !full_name || !/^\d{10}$/.test(phone) || !email.includes("@")) {
-        errors.push({ employee_id, email, error: "Invalid row (employee_id/full_name/phone/email)" });
+      if (!email || !employee_id) {
+        invalid++;
         continue;
       }
 
-      // 1) Upsert employee record
-      const { data: emp, error: empErr } = await admin
-      .from("company_employees")
-      .upsert(
-        {
-          company_key: "apar",
-          employee_id: r.employee_id,
-          full_name: r.full_name,
-          phone: r.phone,
-          email: r.email,
-        },
-        {
-          onConflict: "company_key,email",
-        }
-      );
+      // ✅ Upsert employee record (send BOTH company_key + company)
+      const { error: empErr } = await admin
+        .from("company_employees")
+        .upsert(
+          {
+            company_key,
+            company: company_key, // ✅ fixes NOT NULL constraint
+            employee_id,
+            full_name: full_name || null,
+            phone: phone || null,
+            email,
+          },
+          { onConflict: "company_key,email" }
+        );
 
       if (empErr) {
-        errors.push({ employee_id, email, error: empErr.message });
+        invalid++;
         continue;
       }
 
-      // we can’t easily know insert vs update here reliably -> count as processed
-      // (optional: you can fetch before upsert if you want exact)
-      insertedEmployees += emp ? 1 : 0;
+      imported++;
 
-      // 2) Ensure auth user exists
-      const existingUserId = await findAuthUserIdByEmail(admin, email);
+      const existingUid = existingEmails.get(email);
 
-      if (!existingUserId) {
-        const { error: createErr } = await admin.auth.admin.createUser({
-          email,
-          password: "NEW12345",
-          email_confirm: true,
-          user_metadata: {
-            company_key,
+      if (existingUid) {
+        existingKept++;
+
+        // Optional: fill missing profile without forcing password change
+        await admin.from("profiles").upsert(
+          {
+            id: existingUid,
+            email,
+            company: company_key,
             employee_id,
-            full_name,
-            phone,
-            temp_password: true,
+            full_name: full_name || null,
+            phone: phone || null,
           },
-        });
+          { onConflict: "id" }
+        );
 
-        if (createErr) {
-          errors.push({ employee_id, email, error: createErr.message });
-          continue;
-        }
-
-        createdAuth += 1;
-      } else {
-        existedAuth += 1; // already had account -> do NOT reset password
+        continue;
       }
+
+      // ✅ Create auth user
+      const { data: created, error: createErr } = await admin.auth.admin.createUser({
+        email,
+        password: "NEW12345",
+        email_confirm: true,
+      });
+
+      if (createErr || !created?.user?.id) {
+        invalid++;
+        continue;
+      }
+
+      const uid = created.user.id;
+      existingEmails.set(email, uid);
+      createdAuth++;
+
+      // ✅ force password change only for NEW users
+      await admin.from("profiles").upsert(
+        {
+          id: uid,
+          email,
+          company: company_key,
+          employee_id,
+          full_name: full_name || null,
+          phone: phone || null,
+          must_change_password: true,
+        },
+        { onConflict: "id" }
+      );
     }
 
     return NextResponse.json({
       ok: true,
-      insertedEmployees,
-      existedEmployees, // not used currently, kept for future
-      createdAuth,
-      existedAuth,
-      errors,
+      imported,
+      existing_kept: existingKept,
+      invalid,
+      created_auth: createdAuth,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
