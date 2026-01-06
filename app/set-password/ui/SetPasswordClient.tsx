@@ -30,20 +30,43 @@ export default function SetPasswordClient({ next }: { next: string }) {
 
     setLoading(true);
     try {
-      const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) {
+      const { data: sessRes, error: sessErr } = await supabase.auth.getSession();
+      if (sessErr || !sessRes?.session?.user) {
         router.replace("/login");
         return;
       }
 
-      // ✅ update password AND clear the flag
-      const { error } = await supabase.auth.updateUser({
+      const user = sessRes.session.user;
+      const userId = user.id;
+
+      // ✅ 1) Update AUTH password AND clear metadata flag
+      const { error: authErr } = await supabase.auth.updateUser({
         password,
         data: { must_change_password: false },
       });
 
-      if (error) {
-        setMsg(error.message);
+      if (authErr) {
+        setMsg(authErr.message);
+        return;
+      }
+
+      // ✅ 2) Update PROFILES flags (your profiles PK is user_id, not id)
+      // IMPORTANT: update ONLY the flags so we don’t touch NOT NULL columns (full_name/phone/email).
+      const { error: profErr } = await supabase
+        .from("profiles")
+        .update({
+          must_change_password: false,
+          password_set: true,
+        })
+        .eq("user_id", userId);
+
+      if (profErr) {
+        // If this fails, your login check may still force set-password again.
+        // So we must show error instead of silently redirecting.
+        setMsg(
+          `Password updated, but profile flags could not be saved: ${profErr.message}. ` +
+            `Please contact admin.`
+        );
         return;
       }
 
@@ -56,7 +79,11 @@ export default function SetPasswordClient({ next }: { next: string }) {
   return (
     <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
       <div className="w-full max-w-sm">
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
           <h1 className="text-3xl font-bold">Set new password</h1>
           <p className="text-white/60 mt-2 text-sm">
             This is required on your first login. After saving, you’ll continue.
@@ -80,7 +107,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
           />
         </div>
 
-        {msg && <div className="mt-3 text-sm text-red-400">{msg}</div>}
+        {msg && <div className="mt-3 text-sm text-red-400 whitespace-pre-line">{msg}</div>}
 
         <button
           disabled={!canSave || loading}
