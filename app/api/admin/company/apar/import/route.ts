@@ -16,8 +16,8 @@ function normEmail(v: any) {
   return String(v || "").trim().toLowerCase();
 }
 function normPhone(v: any) {
-  const d = String(v || "").replace(/\D/g, "");
-  return d.length >= 10 ? d.slice(-10) : "";
+  // keep digits only, max 10
+  return String(v || "").replace(/\D/g, "").slice(0, 10);
 }
 function normEmp(v: any) {
   return String(v || "").trim();
@@ -38,137 +38,134 @@ export async function POST(req: Request) {
     const company_key = "apar";
     const company = "apar";
 
-    // ✅ keep it to avoid timeouts; your UI already chunks 50
-    const MAX_AUTH_ACTIONS_PER_REQUEST = 25;
-
-    // 1) Clean rows
-    const cleaned: {
-      employee_id: string;
-      full_name: string;
-      phone: string;
-      email: string;
-    }[] = [];
-
-    let invalid = 0;
-    let invalid_missing_phone = 0;
-
-    for (const r of rows) {
-      const email = normEmail(r.email);
-      const employee_id = normEmp(r.employee_id);
-      const phone = normPhone(r.phone);
-      const full_name = normName(r.full_name) || employee_id || email;
-
-      if (!email || !employee_id) {
-        invalid++;
-        continue;
-      }
-      if (!phone) {
-        invalid++;
-        invalid_missing_phone++;
-        continue;
-      }
-
-      cleaned.push({ employee_id, full_name, phone, email });
-    }
-
-    if (!cleaned.length) {
-      return NextResponse.json(
-        {
-          error: "No valid rows to import.",
-          invalid,
-          invalid_missing_phone,
-          note: "Phone is mandatory because profiles.phone is NOT NULL.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // 2) Bulk upsert employees
-    const empPayload = cleaned.map((r) => ({
-      company,
-      company_key,
-      employee_id: r.employee_id,
-      full_name: r.full_name,
-      phone: r.phone,
-      email: r.email,
-    }));
-
-    const { error: empErr } = await admin
-      .from("company_employees")
-      .upsert(empPayload, { onConflict: "company_key,email" });
-
-    if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
-
-    // 3) Load existing auth users once
+    // ✅ 1) Load existing auth users ONCE
     const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
       page: 1,
       perPage: 2000,
     });
     if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
 
-    const emailToAuthId = new Map<string, string>();
+    // email -> userId map
+    const emailToUid = new Map<string, string>();
     for (const u of listRes?.users || []) {
       const em = (u.email || "").toLowerCase();
-      if (em && u.id) emailToAuthId.set(em, u.id);
+      if (em && u.id) emailToUid.set(em, u.id);
     }
 
-    // 4) Read profiles for these auth ids (to know password_set)
-    const authIds = Array.from(emailToAuthId.values());
-    let passwordSetByUserId = new Map<string, boolean>();
+    // ✅ 2) Clean rows
+    const cleanedEmployees: {
+      company: string;
+      company_key: string;
+      employee_id: string;
+      full_name: string;
+      phone: string; // NOT NULL safe for profiles too
+      email: string;
+    }[] = [];
 
-    if (authIds.length > 0) {
-      const { data: profRows } = await admin
-        .from("profiles")
-        .select("user_id, password_set")
-        .in("user_id", authIds);
+    let invalid = 0;
 
-      for (const p of profRows || []) {
-        passwordSetByUserId.set(String(p.user_id), Boolean(p.password_set));
-      }
-    }
+    for (const r of rows) {
+      const email = normEmail(r.email);
+      const employee_id = normEmp(r.employee_id);
+      const full_name_raw = normName(r.full_name);
+      const phone_raw = normPhone(r.phone);
 
-    // helper
-    async function upsertProfile(user_id: string, r: any, must_change_password: boolean, password_set: boolean) {
-      const { error } = await admin.from("profiles").upsert(
-        {
-          user_id,
-          full_name: r.full_name,
-          phone: r.phone,
-          email: r.email,
-          employee_id: r.employee_id,
-          company,
-          must_change_password,
-          password_set,
-        },
-        { onConflict: "user_id" }
-      );
-      return error;
-    }
-
-    // 5) Create/repair auth users (limited per request)
-    let imported = cleaned.length;
-    let existing_kept = 0;
-    let created_auth = 0;
-    let repaired_password = 0;
-    let skipped_due_to_limit = 0;
-
-    for (const r of cleaned) {
-      if (created_auth + repaired_password >= MAX_AUTH_ACTIONS_PER_REQUEST) {
-        skipped_due_to_limit++;
+      if (!email || !employee_id) {
+        invalid++;
         continue;
       }
 
-      const existingId = emailToAuthId.get(r.email);
+      const full_name = full_name_raw || employee_id;
+      const phone = phone_raw || ""; // ✅ safe for profiles NOT NULL
 
-      if (!existingId) {
-        // create auth
-        const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      cleanedEmployees.push({
+        company,
+        company_key,
+        employee_id,
+        full_name,
+        phone,
+        email,
+      });
+    }
+
+    if (!cleanedEmployees.length) {
+      return NextResponse.json({ error: "No valid rows to import.", invalid }, { status: 400 });
+    }
+
+    // ✅ 3) Bulk upsert company_employees (fast)
+    const { error: empErr } = await admin
+      .from("company_employees")
+      .upsert(
+        cleanedEmployees.map((r) => ({
+          company: r.company,
+          company_key: r.company_key,
+          employee_id: r.employee_id,
+          full_name: r.full_name,
+          phone: r.phone || null,
           email: r.email,
+        })),
+        { onConflict: "company_key,email" }
+      );
+
+    if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
+
+    // ✅ 4) Create missing auth users (limited per request)
+    const MAX_AUTH_CREATE_PER_REQUEST = 25;
+
+    let imported = cleanedEmployees.length;
+    let existing_kept = 0;
+    let created_auth = 0;
+    let auth_failed = 0;
+
+    // ✅ NEW: repair existing auth users that haven't set password yet
+    let repaired_auth = 0;
+    let repaired_skipped_password_set = 0;
+
+    // Profiles we will upsert (user_id is PK)
+    const profilesUpserts: any[] = [];
+
+    // We'll only query profiles for the users we care about (existing auth users)
+    const existingUids: string[] = [];
+    for (const r of cleanedEmployees) {
+      const uid = emailToUid.get(r.email);
+      if (uid) existingUids.push(uid);
+    }
+
+    // Fetch existing profiles in one go (if none, returns empty)
+    // NOTE: profiles PK is user_id (based on your constraints)
+    let profilesByUid = new Map<string, any>();
+    if (existingUids.length > 0) {
+      const { data: profRows, error: profReadErr } = await admin
+        .from("profiles")
+        .select("user_id, password_set, must_change_password")
+        .in("user_id", Array.from(new Set(existingUids)));
+
+      if (!profReadErr && Array.isArray(profRows)) {
+        for (const p of profRows) profilesByUid.set(String(p.user_id), p);
+      }
+    }
+
+    for (const r of cleanedEmployees) {
+      const email = r.email;
+      const existingUid = emailToUid.get(email);
+
+      // -------------------------
+      // A) Auth DOES NOT exist => create new auth user
+      // -------------------------
+      if (!existingUid) {
+        if (created_auth >= MAX_AUTH_CREATE_PER_REQUEST) {
+          // don't fail whole import, just stop creating new auth
+          continue;
+        }
+
+        const { data: created, error: createErr } = await admin.auth.admin.createUser({
+          email,
           password: "NEW12345",
           email_confirm: true,
           user_metadata: {
             must_change_password: true,
             company_key,
+            company,
             employee_id: r.employee_id,
             full_name: r.full_name,
             phone: r.phone,
@@ -176,44 +173,54 @@ export async function POST(req: Request) {
         });
 
         if (createErr) {
-          invalid++;
+          auth_failed++;
           continue;
         }
 
         const uid = created?.user?.id;
         if (!uid) {
-          invalid++;
+          auth_failed++;
           continue;
         }
 
-        const e = await upsertProfile(uid, r, true, false);
-        if (e) return NextResponse.json({ error: e.message }, { status: 500 });
-
-        emailToAuthId.set(r.email, uid);
-        passwordSetByUserId.set(uid, false);
+        emailToUid.set(email, uid);
         created_auth++;
+
+        // ✅ create profile row for password logic
+        profilesUpserts.push({
+          user_id: uid,
+          email,
+          full_name: r.full_name,
+          phone: r.phone || "",
+          employee_id: r.employee_id,
+          company,
+          must_change_password: true,
+          password_set: false,
+        });
+
         continue;
       }
 
-      // auth exists
-      const ps = passwordSetByUserId.get(existingId);
+      // -------------------------
+      // B) Auth EXISTS => do NOT reset by default
+      // But REPAIR if password_set is false OR profile missing
+      // -------------------------
+      existing_kept++;
 
-      // If profile missing -> create profile but do not touch password
-      if (ps === undefined) {
-        const e = await upsertProfile(existingId, r, false, true);
-        if (e) return NextResponse.json({ error: e.message }, { status: 500 });
+      const prof = profilesByUid.get(existingUid);
 
-        existing_kept++;
-        continue;
-      }
+      const passwordSet = prof?.password_set === true; // strict
+      const mustChange = prof?.must_change_password === true;
 
-      // If password not set -> safe repair to NEW12345
-      if (ps === false) {
-        const { error: updErr } = await admin.auth.admin.updateUserById(existingId, {
+      // If profile missing OR indicates not set yet => repair
+      if (!passwordSet) {
+        // ✅ Force password NEW12345 + must_change_password true
+        const { error: updErr } = await admin.auth.admin.updateUserById(existingUid, {
           password: "NEW12345",
           user_metadata: {
             must_change_password: true,
             company_key,
+            company,
             employee_id: r.employee_id,
             full_name: r.full_name,
             phone: r.phone,
@@ -221,19 +228,46 @@ export async function POST(req: Request) {
         });
 
         if (updErr) {
-          invalid++;
+          auth_failed++;
           continue;
         }
 
-        const e = await upsertProfile(existingId, r, true, false);
-        if (e) return NextResponse.json({ error: e.message }, { status: 500 });
+        // ✅ Ensure profile exists + flags are correct
+        profilesUpserts.push({
+          user_id: existingUid,
+          email,
+          full_name: r.full_name,
+          phone: r.phone || "",
+          employee_id: r.employee_id,
+          company,
+          must_change_password: true,
+          password_set: false,
+        });
 
-        repaired_password++;
-        continue;
+        repaired_auth++;
+      } else {
+        // User already set password => keep as-is
+        repaired_skipped_password_set++;
+        // Optional: keep profile info updated but DO NOT touch flags
+        profilesUpserts.push({
+          user_id: existingUid,
+          email,
+          full_name: r.full_name,
+          phone: r.phone || "",
+          employee_id: r.employee_id,
+          company,
+          // do NOT include must_change_password/password_set here
+        });
       }
+    }
 
-      // password_set=true -> keep as is
-      existing_kept++;
+    // ✅ 5) Bulk upsert profiles
+    // profiles PK is user_id
+    if (profilesUpserts.length > 0) {
+      const { error: profErr } = await admin.from("profiles").upsert(profilesUpserts, {
+        onConflict: "user_id",
+      });
+      if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -241,13 +275,13 @@ export async function POST(req: Request) {
       imported,
       existing_kept,
       created_auth,
-      repaired_password,
+      repaired_auth,
+      repaired_skipped_password_set,
       invalid,
-      invalid_missing_phone,
-      skipped_due_to_limit,
+      auth_failed,
       hint:
-        skipped_due_to_limit > 0
-          ? "Limited auth actions per request. Your UI must continue calling import in chunks until skipped_due_to_limit becomes 0."
+        created_auth >= MAX_AUTH_CREATE_PER_REQUEST
+          ? "Auth creation has per-request limit (25). Upload again if you still have missing users."
           : "Done.",
     });
   } catch (e: any) {
