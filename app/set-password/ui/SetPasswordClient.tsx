@@ -93,7 +93,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
         <div className="space-y-3">
           <input
             className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none focus:border-white/30"
-            placeholder="New password (min 6)"
+            placeholder="New password (minimum 6 characters)"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

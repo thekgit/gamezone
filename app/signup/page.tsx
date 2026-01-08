@@ -4,7 +4,12 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { redirect } from "next/navigation";
 
+export default function SignupPage() {
+  redirect("/login");
+}
+{/*
 export default function SignupPage() {
   const router = useRouter();
 
@@ -130,3 +135,4 @@ export default function SignupPage() {
     </main>
   );
 }
+  */}

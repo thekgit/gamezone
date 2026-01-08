@@ -107,13 +107,14 @@ export default function LoginClient() {
             Forgot password?
           </a>
         </div>
-
+        {/*
         <div className="mt-4 text-sm text-white/60">
           New here?{" "}
           <Link className="text-white underline" href="/signup">
             Create account
           </Link>
         </div>
+        */}
       </div>
     </main>
   );
