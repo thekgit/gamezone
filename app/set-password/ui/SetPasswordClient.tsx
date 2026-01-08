@@ -105,6 +105,8 @@ export default function SetPasswordClient({ next }: { next: string }) {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
+          <p className="text-white/60 mt-2 text-sm">Use your email + password.</p>
+
         </div>
 
         {msg && <div className="mt-3 text-sm text-red-400 whitespace-pre-line">{msg}</div>}
