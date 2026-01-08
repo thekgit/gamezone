@@ -72,7 +72,8 @@ export default function LoginClient() {
       <div className="w-full max-w-sm">
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
           <h1 className="text-3xl font-bold">Login</h1>
-          <p className="text-white/60 mt-2 text-sm">Use your email + password.</p>
+          <p className="text-white/60 mt-2 text-sm">Please use your company-provided email ID for Login.</p>
+          <p className="text-white/60 mt-2 text-sm">Or use the email ID you provided to your company for signup.</p>
         </motion.div>
 
         <div className="space-y-3">
