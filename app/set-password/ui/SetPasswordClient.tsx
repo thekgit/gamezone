@@ -85,9 +85,7 @@ export default function SetPasswordClient({ next }: { next: string }) {
           className="mb-6"
         >
           <h1 className="text-3xl font-bold">Set new password</h1>
-          <p className="text-white/60 mt-2 text-sm">
-            This is required on your first login. After saving, you’ll continue.
-          </p>
+          
         </motion.div>
 
         <div className="space-y-3">
