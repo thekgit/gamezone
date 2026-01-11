@@ -34,12 +34,7 @@ export default async function AdminPanelLayout({
               >
                 Visitors
               </Link>
-              <Link
-                href="/admin/visitors"
-                className="block w-full rounded-lg px-3 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-700 font-medium"
-              >
-                Visitors
-              </Link>
+              
               <Link
                 href="/admin/users"
                 className="block w-full rounded-lg px-3 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-700 font-medium"
