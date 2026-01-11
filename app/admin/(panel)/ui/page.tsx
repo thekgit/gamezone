@@ -1,4 +1,4 @@
-import UsersClient from "../users/ui/UsersClient";
+import UsersClient from "../../../api/admin/users/ui/UsersClient";
 
 export const dynamic = "force-dynamic";
 
