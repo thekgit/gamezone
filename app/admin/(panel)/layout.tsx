@@ -22,8 +22,18 @@ export default async function AdminPanelLayout({ children }: { children: React.R
             href="/admin/visitors"
             className="block w-full rounded-lg px-3 py-2 bg-blue-50 text-blue-700 font-medium"
           >
-            Visitors
+            Apar
           </Link>
+          <Link
+            href="/admin/users"
+            className="block w-full rounded-lg px-3 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-700 font-medium"
+          >
+            Users
+          </Link>
+          <Link
+            href="/admin/games"
+            className="block w-full rounded-lg px-3 py-2 text-gray-700 hover:bg-blue-50 hover:text-blue-700 font-medium"
+          ></Link>
           <Link href="/admin/games" className="...">Games</Link>
           <div className="mt-4">
             <LogoutButton />
