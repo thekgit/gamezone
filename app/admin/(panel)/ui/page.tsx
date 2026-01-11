@@ -1,4 +1,6 @@
-import UsersClient from "./ui/UsersClient";
+import UsersClient from "../users/ui/UsersClient";
+
+export const dynamic = "force-dynamic";
 
 export default function UsersPage() {
   return (
