@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 
 function linkClass(active: boolean) {
   return active
-    ? "block rounded-lg px-3 py-2 bg-blue-600 text-white font-semibold"
-    : "block rounded-lg px-3 py-2 text-white/70 hover:bg-white/10";
+  ? "block rounded-lg px-3 py-2 bg-blue-600 font-semibold"
+  : "block rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15";
 }
 
 export default function SidebarNav() {
