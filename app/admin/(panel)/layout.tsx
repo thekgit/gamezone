@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import SidebarNav from "./ui/SidebarNav";
+import LogoutButton from "./ui/LogoutButton";
 
 export default async function AdminPanelLayout({
   children,
@@ -13,20 +14,25 @@ export default async function AdminPanelLayout({
 
   return (
     <div className="flex min-h-screen bg-[#0b0b0b] text-white">
-      <aside className="w-64 bg-black border-r border-white/10 p-5">
-        <h2 className="text-lg font-bold">Admin</h2>
-        <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
+      <aside className="w-64 bg-black border-r border-white/10 p-5 flex flex-col">
+        <div>
+          <h2 className="text-lg font-bold text-white">Admin</h2>
+          <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
 
-        <SidebarNav />
+          {/* ✅ Blue active highlight */}
+          <SidebarNav />
+        </div>
 
-        <form action="/api/admin/auth/logout" method="post">
-          <button className="mt-6 w-full rounded-lg bg-white/10 px-3 py-2 text-left hover:bg-white/15">
-            Logout
-          </button>
-        </form>
+        {/* ✅ Logout visible directly below menu */}
+        <div className="mt-4">
+          <LogoutButton />
+        </div>
       </aside>
 
-      <main className="flex-1 p-6 bg-[#111] overflow-y-auto">{children}</main>
+      {/* ✅ Full width content */}
+      <main className="flex-1 p-6 bg-[#111] overflow-y-auto">
+        <div className="w-full">{children}</div>
+      </main>
     </div>
   );
 }
