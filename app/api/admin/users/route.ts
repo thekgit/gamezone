@@ -14,6 +14,7 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
+    // ✅ NOTE: We'll add delete-filter once we confirm how delete works (deleted_at / is_deleted etc.)
     const { data, error } = await admin
       .from("profiles")
       .select("user_id, full_name, email, phone, employee_id, company")
@@ -23,7 +24,6 @@ export async function GET() {
       return NextResponse.json({ error: error.message, users: [] }, { status: 500 });
     }
 
-    // ✅ CRITICAL: add `id` so your existing UI can edit/update
     const users = (data ?? []).map((u: any) => ({
       id: u.user_id,
       user_id: u.user_id,
@@ -55,8 +55,31 @@ async function updateUser(body: any) {
   }
 
   const payload: Record<string, any> = {};
-  if (body.full_name !== undefined) payload.full_name = String(body.full_name || "").trim();
-  if (body.phone !== undefined) payload.phone = String(body.phone || "").trim();
+
+  // sanitize + validate name
+  if (body.full_name !== undefined) {
+    const name = String(body.full_name || "").trim();
+    if (name.length < 3) {
+      return NextResponse.json(
+        { error: "Name must be at least 3 characters." },
+        { status: 400 }
+      );
+    }
+    payload.full_name = name;
+  }
+
+  // sanitize + validate phone (digits only, exactly 10)
+  if (body.phone !== undefined) {
+    const phoneDigits = String(body.phone || "").replace(/\D/g, "");
+    if (phoneDigits.length !== 10) {
+      return NextResponse.json(
+        { error: "Phone must be exactly 10 digits." },
+        { status: 400 }
+      );
+    }
+    payload.phone = phoneDigits;
+  }
+
   if (body.employee_id !== undefined) payload.employee_id = String(body.employee_id || "").trim();
   if (body.company !== undefined) payload.company = String(body.company || "").trim();
 
