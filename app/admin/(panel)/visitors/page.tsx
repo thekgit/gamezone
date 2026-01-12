@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function VisitorsAliasPage() {
-  redirect("/admin/visitors");
+  redirect("/admin/dashboard");
 }
