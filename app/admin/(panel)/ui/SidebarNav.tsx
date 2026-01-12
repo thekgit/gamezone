@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-function linkClass(active: boolean) {
+function cls(active: boolean) {
   return active
-    ? "block w-full rounded-lg px-3 py-2 bg-blue-600 text-white font-semibold"
-    : "block w-full rounded-lg px-3 py-2 bg-white/10 text-white hover:bg-white/15";
+    ? "block rounded-lg px-3 py-2 bg-blue-600 text-white font-semibold"
+    : "block rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15 text-white";
 }
 
 export default function SidebarNav() {
@@ -17,18 +17,10 @@ export default function SidebarNav() {
   const isGames = pathname.startsWith("/admin/games");
 
   return (
-    <nav className="space-y-2">
-      <Link href="/admin/visitors" className={linkClass(isVisitors)}>
-        Visitors
-      </Link>
-
-      <Link href="/admin/users" className={linkClass(isUsers)}>
-        Users
-      </Link>
-
-      <Link href="/admin/games" className={linkClass(isGames)}>
-        Games
-      </Link>
-    </nav>
+    <div className="space-y-2">
+      <Link href="/admin/visitors" className={cls(isVisitors)}>Visitors</Link>
+      <Link href="/admin/users" className={cls(isUsers)}>Users</Link>
+      <Link href="/admin/games" className={cls(isGames)}>Games</Link>
+    </div>
   );
 }
