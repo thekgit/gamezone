@@ -6,7 +6,7 @@ import EditUserModal from "./EditUserModal";
 import ConfirmModal from "./ConfirmModal";
 
 export type AdminUser = {
-  user_id: string; // profiles.user_id (PK)
+  user_id: string;
   full_name: string;
   email: string;
   phone: string;
@@ -27,29 +27,24 @@ export default function UsersClient() {
 
   const loadUsers = async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await fetch("/api/admin/users/list", {
         method: "GET",
-        credentials: "include", // ✅ ensures cookies go
+        credentials: "include",
         cache: "no-store",
-        headers: { "Accept": "application/json" },
+        headers: { Accept: "application/json" },
       });
-  
+
       const data = await res.json().catch(() => null);
-  
+
       if (!res.ok) {
-        console.error("Users list failed:", res.status, data);
         setUsers([]);
-        // optional: show error message somewhere
+        setErrorMsg(data?.error || `Failed to load users (${res.status})`);
         return;
       }
-  
-      // ✅ Support BOTH formats:
-      // 1) { users: [...] }
-      // 2) [ ... ]
+
       const list = Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : [];
-  
-      console.log("Users fetched:", list.length, list);
       setUsers(list);
     } finally {
       setLoading(false);
@@ -71,7 +66,7 @@ export default function UsersClient() {
   }, [users, query]);
 
   return (
-    <div className="text-white">
+    <div className="w-full text-white">
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -97,16 +92,15 @@ export default function UsersClient() {
         </div>
       ) : null}
 
-      <div className="mt-4">
+      {/* Search full width */}
+      <div className="mt-4 w-full">
         <SearchBar value={query} onChange={setQuery} />
       </div>
 
-      {/* ✅ Dark container like your old screens */}
+      {/* Full width container */}
       <div className="mt-4 w-full rounded-2xl border border-white/10 bg-black/30">
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1200px] text-sm">
-            {/* ✅ Make header subtle, not white */}
+        <div className="w-full overflow-x-auto">
+          <table className="w-full min-w-[1100px] text-sm">
             <thead className="border-b border-white/10 text-white/70">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">Name</th>

@@ -8,13 +8,11 @@ export default function SearchBar({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="mb-4">
-      <input
-        className="w-full max-w-xl rounded-xl bg-white/5 border border-white/10 px-4 py-2 text-white placeholder:text-white/40"
-        placeholder="Search by name, email, or phone..."
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder="Search by name, email, or phone..."
+      className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white placeholder:text-white/40 outline-none focus:border-white/20"
+    />
   );
 }
