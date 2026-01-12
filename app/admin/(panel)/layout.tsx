@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import SidebarNav from "./SidebarNav";
+import SidebarNav from "./ui/SidebarNav";
 import LogoutButton from "./ui/LogoutButton";
 
 export default async function AdminPanelLayout({
@@ -22,7 +22,6 @@ export default async function AdminPanelLayout({
           <SidebarNav />
         </div>
 
-        {/* visible just below menu (not at bottom empty) */}
         <div className="mt-4">
           <LogoutButton />
         </div>
