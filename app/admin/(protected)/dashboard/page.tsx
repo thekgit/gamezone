@@ -1,5 +1,5 @@
-import AdminDashboardClient from "./ui/AdminDashboardClient";
+import { redirect } from "next/navigation";
 
-export default function DashboardPage() {
-  return <AdminDashboardClient />;
+export default function AdminDashboardRedirect() {
+  redirect("/admin/visitors");
 }
