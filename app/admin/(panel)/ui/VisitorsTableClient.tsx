@@ -4,21 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 
 type Row = {
   id: string;
-
   status: string | null;
-
   timestamp: string | null;
-
   name: string;
   phone: string;
   email: string;
-
   game: string;
-
   start_time: string | null;
   end_time: string | null;
-
-  // ✅ exact scan time from your API (ended_at)
   exit_time: string | null;
 };
 
@@ -29,7 +22,10 @@ function fmtDateTime(iso?: string | null) {
 
 function fmtTime(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function fmtSlot(start?: string | null, end?: string | null) {
@@ -77,13 +73,12 @@ export default function VisitorsTableClient() {
       return;
     }
 
-    // If your UI shows QR somewhere else, keep that logic.
-    // We just refresh so button state updates after scan.
     await load();
   };
 
   return (
     <div className="w-full">
+      {/* Top actions */}
       <div className="flex justify-end mb-4">
         <button
           onClick={load}
@@ -94,70 +89,73 @@ export default function VisitorsTableClient() {
         </button>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 overflow-hidden">
-        <table className="w-full text-sm text-white">
-          <thead className="text-white/60">
-            <tr className="border-b border-white/10">
-              <th className="text-left px-4 py-3">Timestamp</th>
-              <th className="text-left px-4 py-3">Name</th>
-              <th className="text-left px-4 py-3">Phone</th>
-              <th className="text-left px-4 py-3">Email</th>
-              <th className="text-left px-4 py-3">Game</th>
-              <th className="text-left px-4 py-3">Slot</th>
+      {/* Table container */}
+      <div className="w-full overflow-x-auto">
+        <div className="rounded-2xl border border-white/10 bg-black/40 backdrop-blur overflow-hidden">
+          <table className="min-w-[1100px] w-full text-sm text-white">
+            <thead className="text-white/60 border-b border-white/10">
+              <tr>
+                <th className="text-left px-4 py-3">Timestamp</th>
+                <th className="text-left px-4 py-3">Name</th>
+                <th className="text-left px-4 py-3">Phone</th>
+                <th className="text-left px-4 py-3">Email</th>
+                <th className="text-left px-4 py-3">Game</th>
+                <th className="text-left px-4 py-3">Slot</th>
+                <th className="text-left px-4 py-3">Exit Time</th>
+                <th className="text-left px-4 py-3">QR</th>
+              </tr>
+            </thead>
 
-              {/* ✅ NEW COLUMN */}
-              <th className="text-left px-4 py-3">Exit Time</th>
+            <tbody>
+              {sorted.map((r) => {
+                const isCompleted =
+                  (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
 
-              <th className="text-left px-4 py-3">QR</th>
-            </tr>
-          </thead>
+                return (
+                  <tr
+                    key={r.id}
+                    className="border-b border-white/10 last:border-0 hover:bg-white/5"
+                  >
+                    <td className="px-4 py-4">{fmtDateTime(r.timestamp)}</td>
+                    <td className="px-4 py-4">{r.name || "-"}</td>
+                    <td className="px-4 py-4">{r.phone || "-"}</td>
+                    <td className="px-4 py-4">{r.email || "-"}</td>
+                    <td className="px-4 py-4">{r.game || "-"}</td>
+                    <td className="px-4 py-4">
+                      {fmtSlot(r.start_time, r.end_time)}
+                    </td>
+                    <td className="px-4 py-4">{fmtTime(r.exit_time)}</td>
+                    <td className="px-4 py-4">
+                      {isCompleted ? (
+                        <span className="text-white/60 font-semibold">
+                          Session Completed
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => generateQr(r.id)}
+                          className="rounded-xl bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500"
+                        >
+                          Generate QR
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
 
-          <tbody>
-            {sorted.map((r) => {
-              // ✅ This is the ONLY correct logic:
-              // If ended OR exit_time exists => session completed => no QR button
-              const isCompleted =
-                (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
-
-              return (
-                <tr key={r.id} className="border-b border-white/10 last:border-0">
-                  <td className="px-4 py-4">{fmtDateTime(r.timestamp)}</td>
-                  <td className="px-4 py-4">{r.name || "-"}</td>
-                  <td className="px-4 py-4">{r.phone || "-"}</td>
-                  <td className="px-4 py-4">{r.email || "-"}</td>
-                  <td className="px-4 py-4">{r.game || "-"}</td>
-                  <td className="px-4 py-4">{fmtSlot(r.start_time, r.end_time)}</td>
-
-                  {/* ✅ exact scan time */}
-                  <td className="px-4 py-4">{fmtTime(r.exit_time)}</td>
-
-                  <td className="px-4 py-4">
-                    {isCompleted ? (
-                      <span className="text-white/60 font-semibold">
-                        Session Completed
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => generateQr(r.id)}
-                        className="rounded-xl bg-blue-600 px-4 py-2 font-semibold"
-                      >
-                        Generate QR
-                      </button>
-                    )}
+              {!sorted.length && (
+                <tr>
+                  <td
+                    className="px-4 py-10 text-white/50 text-center"
+                    colSpan={8}
+                  >
+                    No sessions yet.
                   </td>
                 </tr>
-              );
-            })}
-
-            {!sorted.length && (
-              <tr>
-                <td className="px-4 py-8 text-white/50" colSpan={8}>
-                  No sessions yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
