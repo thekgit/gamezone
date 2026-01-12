@@ -12,13 +12,14 @@ function linkClass(active: boolean) {
 export default function SidebarNav() {
   const pathname = usePathname();
 
-  const isVisitors = pathname.startsWith("/admin/dashboard");
+  // ✅ IMPORTANT: Visitors must be /admin/visitors (NOT /admin/dashboard)
+  const isVisitors = pathname.startsWith("/admin/visitors");
   const isUsers = pathname.startsWith("/admin/users");
   const isGames = pathname.startsWith("/admin/games");
 
   return (
     <div className="space-y-2">
-      <Link href="/admin/dashboard" className={linkClass(isVisitors)}>
+      <Link href="/admin/visitors" className={linkClass(isVisitors)}>
         Visitors
       </Link>
 
