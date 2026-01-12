@@ -27,23 +27,30 @@ export default function UsersClient() {
 
   const loadUsers = async () => {
     setLoading(true);
-    setErrorMsg("");
     try {
-      const res = await fetch("/api/admin/users/list", { cache: "no-store" });
-
-      // ✅ If unauthorized, show it instead of silently showing empty
+      const res = await fetch("/api/admin/users/list", {
+        method: "GET",
+        credentials: "include", // ✅ ensures cookies go
+        cache: "no-store",
+        headers: { "Accept": "application/json" },
+      });
+  
+      const data = await res.json().catch(() => null);
+  
       if (!res.ok) {
-        const t = await res.text().catch(() => "");
+        console.error("Users list failed:", res.status, data);
         setUsers([]);
-        setErrorMsg(`Failed to load users (${res.status}). ${t}`);
+        // optional: show error message somewhere
         return;
       }
-
-      const data = await res.json().catch(() => ({}));
-      setUsers(Array.isArray(data?.users) ? data.users : []);
-    } catch (e: any) {
-      setUsers([]);
-      setErrorMsg(e?.message || "Failed to load users");
+  
+      // ✅ Support BOTH formats:
+      // 1) { users: [...] }
+      // 2) [ ... ]
+      const list = Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : [];
+  
+      console.log("Users fetched:", list.length, list);
+      setUsers(list);
     } finally {
       setLoading(false);
     }

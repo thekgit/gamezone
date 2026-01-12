@@ -1,5 +1,9 @@
-import UsersClient from "../ui/UsersClient";
+import UsersClient from "./ui/UsersClient";
 
 export default function UsersPage() {
-  return <UsersClient />;
+  return (
+    <div className="max-w-6xl">
+      <UsersClient />
+    </div>
+  );
 }
