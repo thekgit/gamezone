@@ -29,7 +29,7 @@ export default function UsersClient() {
     setLoading(true);
     setErrorMsg("");
     try {
-      const res = await fetch("/api/admin/users/list", {
+      const res = await fetch("/api/admin/users", {
         method: "GET",
         credentials: "include",
         cache: "no-store",
