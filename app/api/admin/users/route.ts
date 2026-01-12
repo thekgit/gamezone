@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // ------------------------
-// GET: List users
+// GET: List users (IMPORTANT: include `id` for frontend)
 // ------------------------
 export async function GET() {
   try {
@@ -25,7 +25,18 @@ export async function GET() {
       return NextResponse.json({ error: error.message, users: [] }, { status: 500 });
     }
 
-    return NextResponse.json({ users: data ?? [] }, { status: 200 });
+    // ✅ KEY FIX: add `id` so your existing UI (UserRow.id) works
+    const users = (data ?? []).map((u: any) => ({
+      id: u.user_id,       // frontend expects `id`
+      user_id: u.user_id,  // keep original too (harmless)
+      full_name: u.full_name ?? "",
+      email: u.email ?? "",
+      phone: u.phone ?? null,
+      employee_id: u.employee_id ?? null,
+      company: u.company ?? null,
+    }));
+
+    return NextResponse.json({ users }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message || "Server error", users: [] },
@@ -35,20 +46,19 @@ export async function GET() {
 }
 
 // ------------------------
-// UPDATE helper
+// shared update helper
 // ------------------------
-async function updateUser(body: any) {
+async function doUpdate(body: any) {
   if (!assertAdmin()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ✅ support both keys (your DB uses user_id, some UI sends id)
+  // ✅ accept either id or user_id
   const user_id = String(body?.user_id || body?.id || "").trim();
   if (!user_id) {
-    return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
+    return NextResponse.json({ error: "Missing user id" }, { status: 400 });
   }
 
-  // ✅ only update allowed fields
   const payload: {
     full_name?: string;
     phone?: string;
@@ -80,33 +90,24 @@ async function updateUser(body: any) {
 }
 
 // ------------------------
-// PATCH: Update user
+// PATCH: Update (works if UI uses PATCH)
 // ------------------------
 export async function PATCH(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    return await updateUser(body);
+    return await doUpdate(body);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
 
 // ------------------------
-// POST: Also allow update (so it works even if UI uses POST)
-// Supports:
-// - { action: "update", ...fields }
-// - or direct body without action
+// POST: Also allow update (works if UI uses POST)
 // ------------------------
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-
-    // If your UI sends POST for update, this catches it.
-    if (String(body?.action || "").toLowerCase() === "update" || body?.full_name !== undefined || body?.phone !== undefined || body?.employee_id !== undefined || body?.company !== undefined) {
-      return await updateUser(body);
-    }
-
-    return NextResponse.json({ error: "Unsupported POST" }, { status: 400 });
+    return await doUpdate(body);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
