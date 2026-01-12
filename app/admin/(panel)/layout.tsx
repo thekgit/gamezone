@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import SidebarNav from "./ui/SidebarNav";
+import SidebarNav from "./SidebarNav";
 import LogoutButton from "./ui/LogoutButton";
 
 export default async function AdminPanelLayout({
