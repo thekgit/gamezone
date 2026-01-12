@@ -20,38 +20,48 @@ export default function EditUserModal({
 
   const save = async () => {
     setMsg("");
+  
+    const nameClean = full_name.trim();
+    const phoneDigits = String(phone || "").replace(/\D/g, ""); // keep digits only
+  
+    if (nameClean.length < 3) {
+      setMsg("Name must be at least 3 characters.");
+      return;
+    }
+  
+    if (phoneDigits.length !== 10) {
+      setMsg("Phone must be exactly 10 digits.");
+      return;
+    }
+  
     setLoading(true);
-
     try {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          user_id: user.user_id, // ✅ correct key for your DB
-          full_name,
-          phone,
+          user_id: user.user_id,
+          full_name: nameClean,
+          phone: phoneDigits,
           employee_id,
           company,
         }),
       });
-
+  
       const data = await res.json().catch(() => ({}));
-
       if (!res.ok) {
         setMsg(data?.error || "Update failed");
-        return; // ✅ don't close on failure
+        return;
       }
-
-      // ✅ success
-      onClose();
+  
+      onClose(); // success
     } catch (e: any) {
       setMsg(e?.message || "Update failed");
     } finally {
       setLoading(false);
     }
   };
-
   return (
     <ConfirmModalShell
       open={true}
