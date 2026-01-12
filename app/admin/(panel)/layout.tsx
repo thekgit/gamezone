@@ -18,16 +18,20 @@ export default async function AdminPanelLayout({
         <div>
           <h2 className="text-lg font-bold text-white">Admin</h2>
           <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
+
+          {/* ✅ Blue active highlight */}
           <SidebarNav />
         </div>
 
+        {/* ✅ Logout visible directly below menu */}
         <div className="mt-4">
           <LogoutButton />
         </div>
       </aside>
 
+      {/* ✅ Full width content */}
       <main className="flex-1 p-6 bg-[#111] overflow-y-auto">
-        <div className="w-full max-w-none">{children}</div>
+        <div className="w-full">{children}</div>
       </main>
     </div>
   );
