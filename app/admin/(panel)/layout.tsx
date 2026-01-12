@@ -14,7 +14,7 @@ export default async function AdminPanelLayout({
 
   return (
     <div className="flex min-h-screen bg-[#0b0b0b] text-white">
-      <aside className="w-64 bg-black border-r border-white/10 p-5">
+      <aside className="w-64 bg-black border-r border-white/10 p-5 flex flex-col">
         <h2 className="text-lg font-bold text-white">Admin</h2>
         <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
 

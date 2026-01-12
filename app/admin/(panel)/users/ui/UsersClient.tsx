@@ -102,10 +102,10 @@ export default function UsersClient() {
       </div>
 
       {/* ✅ Dark container like your old screens */}
-      <div className="mt-4 rounded-2xl border border-white/10 bg-black/30">
+      <div className="mt-4 w-full rounded-2xl border border-white/10 bg-black/30">
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+          <table className="w-full min-w-[1200px] text-sm">
             {/* ✅ Make header subtle, not white */}
             <thead className="border-b border-white/10 text-white/70">
               <tr>
