@@ -6,7 +6,7 @@ import EditUserModal from "./EditUserModal";
 import ConfirmModal from "./ConfirmModal";
 
 export type AdminUser = {
-  user_id: string;          // profiles.user_id (PK)
+  user_id: string; // profiles.user_id (PK)
   full_name: string;
   email: string;
   phone: string;
@@ -18,6 +18,7 @@ export default function UsersClient() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [confirm, setConfirm] = useState<{ type: "delete" | "reset"; user: AdminUser } | null>(
@@ -26,12 +27,23 @@ export default function UsersClient() {
 
   const loadUsers = async () => {
     setLoading(true);
+    setErrorMsg("");
     try {
       const res = await fetch("/api/admin/users/list", { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
 
-      // ✅ Expect { users: [...] }
+      // ✅ If unauthorized, show it instead of silently showing empty
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        setUsers([]);
+        setErrorMsg(`Failed to load users (${res.status}). ${t}`);
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
       setUsers(Array.isArray(data?.users) ? data.users : []);
+    } catch (e: any) {
+      setUsers([]);
+      setErrorMsg(e?.message || "Failed to load users");
     } finally {
       setLoading(false);
     }
@@ -52,10 +64,11 @@ export default function UsersClient() {
   }, [users, query]);
 
   return (
-    <>
-      <div className="flex items-center justify-between gap-3 mb-3">
+    <div className="text-white">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-lg font-semibold text-white">Users</div>
+          <div className="text-lg font-semibold">Users</div>
           <div className="text-sm text-white/60">
             View / edit / reset password / delete users (sessions remain untouched).
           </div>
@@ -64,76 +77,91 @@ export default function UsersClient() {
         <button
           type="button"
           onClick={loadUsers}
-          className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/15"
+          className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-50"
+          disabled={loading}
         >
           {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
-      <SearchBar value={query} onChange={setQuery} />
+      {errorMsg ? (
+        <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+          {errorMsg}
+        </div>
+      ) : null}
 
-      <div className="overflow-x-auto rounded-2xl border border-white/10">
-        <table className="min-w-full text-sm text-white">
-          <thead className="bg-white/10 text-white/80">
-            <tr>
-              <th className="text-left px-4 py-3">Name</th>
-              <th className="text-left px-4 py-3">Employee ID</th>
-              <th className="text-left px-4 py-3">Email</th>
-              <th className="text-left px-4 py-3">Phone</th>
-              <th className="text-left px-4 py-3">Company</th>
-              <th className="text-left px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {filtered.map((u) => (
-              <tr key={u.user_id} className="border-t border-white/10">
-                <td className="px-4 py-3">{u.full_name}</td>
-                <td className="px-4 py-3">{u.employee_id || "-"}</td>
-                <td className="px-4 py-3">{u.email}</td>
-                <td className="px-4 py-3">{u.phone}</td>
-                <td className="px-4 py-3">{u.company || "-"}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditUser(u)}
-                      className="rounded-lg bg-white/10 px-3 py-1.5 font-semibold hover:bg-white/15"
-                    >
-                      Edit
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setConfirm({ type: "reset", user: u })}
-                      className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold hover:bg-blue-500"
-                    >
-                      Reset Password
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setConfirm({ type: "delete", user: u })}
-                      className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold hover:bg-red-500"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-
-            {filtered.length === 0 && (
-              <tr>
-                <td className="px-4 py-6 text-white/60" colSpan={6}>
-                  No users found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="mt-4">
+        <SearchBar value={query} onChange={setQuery} />
       </div>
 
+      {/* ✅ Dark container like your old screens */}
+      <div className="mt-4 rounded-2xl border border-white/10 bg-black/30">
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            {/* ✅ Make header subtle, not white */}
+            <thead className="border-b border-white/10 text-white/70">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold">Name</th>
+                <th className="text-left px-4 py-3 font-semibold">Employee ID</th>
+                <th className="text-left px-4 py-3 font-semibold">Email</th>
+                <th className="text-left px-4 py-3 font-semibold">Phone</th>
+                <th className="text-left px-4 py-3 font-semibold">Company</th>
+                <th className="text-left px-4 py-3 font-semibold">Actions</th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-white/10">
+              {filtered.map((u) => (
+                <tr key={u.user_id} className="hover:bg-white/5">
+                  <td className="px-4 py-3">{u.full_name}</td>
+                  <td className="px-4 py-3">{u.employee_id || "-"}</td>
+                  <td className="px-4 py-3">{u.email}</td>
+                  <td className="px-4 py-3">{u.phone}</td>
+                  <td className="px-4 py-3">{u.company || "-"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditUser(u)}
+                        className="rounded-lg bg-white/10 px-3 py-1.5 font-semibold hover:bg-white/15"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setConfirm({ type: "reset", user: u })}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 font-semibold hover:bg-blue-500"
+                      >
+                        Reset Password
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setConfirm({ type: "delete", user: u })}
+                        className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold hover:bg-red-500"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {filtered.length === 0 && (
+                <tr>
+                  <td className="px-4 py-10 text-center text-white/60" colSpan={6}>
+                    {loading ? "Loading..." : "No users found."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modals */}
       {editUser && (
         <EditUserModal
           user={editUser}
@@ -156,6 +184,6 @@ export default function UsersClient() {
           }}
         />
       )}
-    </>
+    </div>
   );
 }
