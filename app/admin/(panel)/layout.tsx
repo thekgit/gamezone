@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import SidebarNav from "../(protected)/ui/SidebarNav"; // reuse dark sidebar
+import Link from "next/link";
 import LogoutButton from "./ui/LogoutButton";
 
 export default async function AdminPanelLayout({
@@ -14,20 +14,42 @@ export default async function AdminPanelLayout({
 
   return (
     <div className="flex min-h-screen bg-[#0b0b0b] text-white">
-      <aside className="w-64 bg-black border-r border-white/10 p-5 flex flex-col">
-        <div>
-          <h2 className="text-lg font-bold">Admin</h2>
-          <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
+      <aside className="w-64 bg-black border-r border-white/10 p-5">
+        <h2 className="text-lg font-bold text-white">Admin</h2>
+        <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
 
-          <SidebarNav />
-        </div>
+        <div className="space-y-2">
+          <Link
+            href="/admin/visitors"
+            className="block rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15 text-white"
+          >
+            Visitors
+          </Link>
 
-        <div className="mt-auto pt-4">
-          <LogoutButton />
+          <Link
+            href="/admin/users"
+            className="block rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15 text-white"
+          >
+            Users
+          </Link>
+
+          <Link
+            href="/admin/games"
+            className="block rounded-lg px-3 py-2 bg-white/10 hover:bg-white/15 text-white"
+          >
+            Games
+          </Link>
+
+          {/* ✅ Logout directly below Games */}
+          <div className="pt-2">
+            <LogoutButton />
+          </div>
         </div>
       </aside>
 
-      <main className="flex-1 p-6 bg-[#111] overflow-y-auto">{children}</main>
+      <main className="flex-1 p-6 bg-[#111] overflow-y-auto">
+        <div className="w-full max-w-none">{children}</div>
+      </main>
     </div>
   );
 }
