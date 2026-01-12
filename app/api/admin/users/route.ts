@@ -5,9 +5,7 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// ------------------------
-// GET: List users (IMPORTANT: include `id` for frontend)
-// ------------------------
+// ---------- GET (LIST) ----------
 export async function GET() {
   try {
     if (!assertAdmin()) {
@@ -25,15 +23,15 @@ export async function GET() {
       return NextResponse.json({ error: error.message, users: [] }, { status: 500 });
     }
 
-    // ✅ KEY FIX: add `id` so your existing UI (UserRow.id) works
+    // ✅ CRITICAL: add `id` so your existing UI can edit/update
     const users = (data ?? []).map((u: any) => ({
-      id: u.user_id,       // frontend expects `id`
-      user_id: u.user_id,  // keep original too (harmless)
+      id: u.user_id,
+      user_id: u.user_id,
       full_name: u.full_name ?? "",
       email: u.email ?? "",
-      phone: u.phone ?? null,
-      employee_id: u.employee_id ?? null,
-      company: u.company ?? null,
+      phone: u.phone ?? "",
+      employee_id: u.employee_id ?? "",
+      company: u.company ?? "",
     }));
 
     return NextResponse.json({ users }, { status: 200 });
@@ -45,27 +43,18 @@ export async function GET() {
   }
 }
 
-// ------------------------
-// shared update helper
-// ------------------------
-async function doUpdate(body: any) {
+// ---------- UPDATE helper ----------
+async function updateUser(body: any) {
   if (!assertAdmin()) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ✅ accept either id or user_id
   const user_id = String(body?.user_id || body?.id || "").trim();
   if (!user_id) {
-    return NextResponse.json({ error: "Missing user id" }, { status: 400 });
+    return NextResponse.json({ error: "Missing user id (id/user_id)" }, { status: 400 });
   }
 
-  const payload: {
-    full_name?: string;
-    phone?: string;
-    employee_id?: string;
-    company?: string;
-  } = {};
-
+  const payload: Record<string, any> = {};
   if (body.full_name !== undefined) payload.full_name = String(body.full_name || "").trim();
   if (body.phone !== undefined) payload.phone = String(body.phone || "").trim();
   if (body.employee_id !== undefined) payload.employee_id = String(body.employee_id || "").trim();
@@ -89,25 +78,21 @@ async function doUpdate(body: any) {
   return NextResponse.json({ ok: true }, { status: 200 });
 }
 
-// ------------------------
-// PATCH: Update (works if UI uses PATCH)
-// ------------------------
+// ---------- PATCH (UPDATE) ----------
 export async function PATCH(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    return await doUpdate(body);
+    return await updateUser(body);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
 
-// ------------------------
-// POST: Also allow update (works if UI uses POST)
-// ------------------------
+// ---------- POST (UPDATE fallback) ----------
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    return await doUpdate(body);
+    return await updateUser(body);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

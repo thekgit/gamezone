@@ -21,26 +21,32 @@ export default function EditUserModal({
   const save = async () => {
     setMsg("");
     setLoading(true);
+
     try {
-      const res = await fetch("/api/admin/users/update", {
-        method: "POST",
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
-          user_id: user.user_id,
-          full_name: full_name.trim(),
-          phone: phone.trim(),
-          employee_id: employee_id.trim(),
-          company: company.trim(),
+          user_id: user.user_id, // ✅ correct key for your DB
+          full_name,
+          phone,
+          employee_id,
+          company,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
         setMsg(data?.error || "Update failed");
-        return;
+        return; // ✅ don't close on failure
       }
 
+      // ✅ success
       onClose();
+    } catch (e: any) {
+      setMsg(e?.message || "Update failed");
     } finally {
       setLoading(false);
     }

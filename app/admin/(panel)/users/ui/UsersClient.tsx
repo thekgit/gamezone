@@ -6,7 +6,7 @@ import EditUserModal from "./EditUserModal";
 import ConfirmModal from "./ConfirmModal";
 
 export type AdminUser = {
-  user_id: string;
+  user_id: string;              // key in DB
   full_name: string;
   email: string;
   phone: string;
@@ -28,24 +28,26 @@ export default function UsersClient() {
   const loadUsers = async () => {
     setLoading(true);
     setErrorMsg("");
+
     try {
       const res = await fetch("/api/admin/users", {
         method: "GET",
         credentials: "include",
-        cache: "no-store",
-        headers: { Accept: "application/json" },
       });
 
-      const data = await res.json().catch(() => null);
-
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        setErrorMsg(data?.error || "Failed to load users");
         setUsers([]);
-        setErrorMsg(data?.error || `Failed to load users (${res.status})`);
         return;
       }
 
-      const list = Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : [];
+      // Your API returns: { users: [...] }
+      const list = Array.isArray(data?.users) ? data.users : [];
       setUsers(list);
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Failed to load users");
+      setUsers([]);
     } finally {
       setLoading(false);
     }
@@ -92,12 +94,12 @@ export default function UsersClient() {
         </div>
       ) : null}
 
-      {/* Search full width */}
+      {/* Search */}
       <div className="mt-4 w-full">
         <SearchBar value={query} onChange={setQuery} />
       </div>
 
-      {/* Full width container */}
+      {/* Table */}
       <div className="mt-4 w-full rounded-2xl border border-white/10 bg-black/30">
         <div className="w-full overflow-x-auto">
           <table className="w-full min-w-[1100px] text-sm">
@@ -168,7 +170,7 @@ export default function UsersClient() {
           user={editUser}
           onClose={() => {
             setEditUser(null);
-            loadUsers();
+            loadUsers(); // ✅ refresh list after closing (success)
           }}
         />
       )}
