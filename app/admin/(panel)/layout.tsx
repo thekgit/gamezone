@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import SidebarNav from "./ui/SidebarNav";
+import SidebarNav from "./SidebarNav";
 import LogoutButton from "./ui/LogoutButton";
 
 export default async function AdminPanelLayout({
@@ -16,22 +16,20 @@ export default async function AdminPanelLayout({
     <div className="flex min-h-screen bg-[#0b0b0b] text-white">
       <aside className="w-64 bg-black border-r border-white/10 p-5 flex flex-col">
         <div>
-          <h2 className="text-lg font-bold text-white">Admin</h2>
+          <h2 className="text-lg font-bold">Admin</h2>
           <p className="text-xs text-white/50 mb-6">Akshar Game Zone</p>
 
-          {/* ✅ Blue active highlight */}
           <SidebarNav />
         </div>
 
-        {/* ✅ Logout visible directly below menu */}
+        {/* visible just below menu (not at bottom empty) */}
         <div className="mt-4">
           <LogoutButton />
         </div>
       </aside>
 
-      {/* ✅ Full width content */}
       <main className="flex-1 p-6 bg-[#111] overflow-y-auto">
-        <div className="w-full">{children}</div>
+        <div className="w-full max-w-none">{children}</div>
       </main>
     </div>
   );

@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import SidebarNav from "./ui/SidebarNav";
-
+import SidebarNav from "../(panel)/SidebarNav";
 export default async function ProtectedAdminLayout({
   children,
 }: {
