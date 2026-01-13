@@ -101,11 +101,11 @@ export default function HomePage() {
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Active Sessions</h2>
+            <h2 className="text-center font-semibold">Active Sessions</h2>
           </div>
 
           {sessions.length === 0 ? (
-            <div className="mt-4 text-white/60 text-sm">No active sessions right now.</div>
+            <div className="mt-4 text-center text-white/60 text-sm">No active sessions right now.</div>
           ) : (
             <div className="mt-4 space-y-3">
               {sessions.map((s) => (
