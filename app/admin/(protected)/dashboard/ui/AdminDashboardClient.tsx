@@ -100,7 +100,7 @@ export default function AdminDashboardClient() {
       const res = await fetch("/api/admin/exit-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id }),
+        body: JSON.stringify({ session_id, slot_end: endTarget?.slot_end }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -140,7 +140,8 @@ export default function AdminDashboardClient() {
   };
 
   // ✅ NEW: Call API to end session
-  const endSession = async (session_id: string) => {
+  const endSession = async (r: Row) => {
+    const session_id = r.id;
     setEndErr("");
     setEnding(true);
     try {
@@ -148,7 +149,7 @@ export default function AdminDashboardClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ session_id }),
+        body: JSON.stringify({ session_id, slot_end: r.slot_end }),
       });
 
       const data = await res.json().catch(() => ({}));
