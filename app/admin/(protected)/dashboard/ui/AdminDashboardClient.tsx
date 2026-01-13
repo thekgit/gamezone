@@ -57,11 +57,15 @@ export default function AdminDashboardClient() {
   const load = async () => {
     setMsg("");
     try {
-      // ✅ IMPORTANT: use the route that already returns correct visitor fields
-      const res = await fetch("/api/admin/visitors", { cache: "no-store" });
+      // ✅ IMPORTANT: send cookies (admin auth) so assertAdmin passes
+      const res = await fetch("/api/admin/visitors", {
+        cache: "no-store",
+        credentials: "include",
+      });
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMsg(data?.error || "Failed to load");
+        setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
       setRows((data.rows || []) as Row[]);
@@ -90,7 +94,7 @@ export default function AdminDashboardClient() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
-  // ✅ Generate QR (same as before)
+  // ✅ Generate QR (unchanged)
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -280,10 +284,15 @@ export default function AdminDashboardClient() {
               >
                 No
               </button>
+
               <button
                 onClick={async () => {
-                  const ok = await endSession(endTarget);
+                  const target = endTarget; // ✅ stable reference
+                  if (!target) return;
+
+                  const ok = await endSession(target);
                   if (!ok) return;
+
                   setEndTarget(null);
                   await load();
                 }}
