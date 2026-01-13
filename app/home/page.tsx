@@ -21,7 +21,10 @@ type ActiveSession = {
 
 function t(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function HomePage() {
@@ -30,12 +33,12 @@ export default function HomePage() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // ✅ NEW: Logout handler
+  // ✅ Logout
   const logout = async () => {
     try {
       await supabase.auth.signOut();
     } finally {
-      router.replace("/"); // -> https://k-e18b.vercel.app/
+      router.replace("/");
     }
   };
 
@@ -51,9 +54,7 @@ export default function HomePage() {
         return;
       }
 
-      // ✅ EXTRA SAFETY CHECK (fixes mobile issue)
       const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
       if (uErr || !userRes?.user) {
         await supabase.auth.signOut();
         router.replace("/login?next=/home");
@@ -81,48 +82,52 @@ export default function HomePage() {
     load();
     const id = setInterval(load, 8000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <main className="min-h-screen bg-black text-white px-4 py-10">
-      <div className="mx-auto w-full max-w-3xl">
-        {/* ✅ Title row + Logout */}
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-3xl text-center font-bold">Welcome to the Game Zone</h1>
-            <p className="text-center text-white/60 mt-2">Your active sessions are shown below.</p>
-          </div>
-
-          
-        </div>
+      <div className="mx-auto w-full max-w-3xl text-center">
+        {/* ✅ Page title */}
+        <h1 className="text-3xl font-bold">Welcome to the Game Zone</h1>
+        <p className="text-white/60 mt-2">
+          Your active sessions are shown below.
+        </p>
 
         {msg && <div className="mt-4 text-sm text-red-400">{msg}</div>}
 
+        {/* ✅ Active sessions box */}
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg text-center font-semibold">Active Sessions</h2>
-          </div>
+          <h2 className="text-lg font-semibold">Active Sessions</h2>
 
           {sessions.length === 0 ? (
-            <div className="mt-4 text-center text-white/60 text-sm">No active sessions right now.</div>
+            <div className="mt-4 text-white/60 text-sm">
+              No active sessions right now.
+            </div>
           ) : (
             <div className="mt-4 space-y-3">
               {sessions.map((s) => (
-                <div key={s.id} className="rounded-xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-semibold">{s.game_name || "Game"}</div>
-                    <div className="text-xs text-center px-3 py-1 rounded-full bg-green-600/20 text-green-300 border border-green-500/30">
-                      Active
-                    </div>
+                <div
+                  key={s.id}
+                  className="rounded-xl border border-white/10 bg-black/30 p-4 text-center"
+                >
+                  <div className="font-semibold text-lg">
+                    {s.game_name || "Game"}
                   </div>
 
-                  <div className="mt-2 text-sm text-white/70">
-                    Players: <span className="text-center text-white">{s.players ?? "-"}</span>
+                  <div className="mt-2 inline-block text-xs px-3 py-1 rounded-full bg-green-600/20 text-green-300 border border-green-500/30">
+                    Active
                   </div>
 
-                  <div className="mt-1 text-sm text-center text-white/70">
-                    Time: <span className="text-white">{t(s.started_at)} – {t(s.ends_at)}</span>
+                  <div className="mt-3 text-sm text-white/70">
+                    Players:{" "}
+                    <span className="text-white">{s.players ?? "-"}</span>
+                  </div>
+
+                  <div className="mt-1 text-sm text-white/70">
+                    Time:{" "}
+                    <span className="text-white">
+                      {t(s.started_at)} – {t(s.ends_at)}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -130,21 +135,21 @@ export default function HomePage() {
           )}
         </div>
 
-        <div className="mt-6">
+        {/* ✅ Actions */}
+        <div className="mt-6 space-y-4">
           <Link
             href="/select"
-            className="block w-full rounded-2xl py-4 text-center font-semibold bg-blue-600 hover:bg-blue-500"
+            className="block w-full rounded-2xl py-4 font-semibold bg-blue-600 hover:bg-blue-500"
           >
             Slot Booking
           </Link>
-          <div className="mt-4">
-            <button
-              onClick={logout}
-              className="w-full rounded-2xl py-3 text-center font-semibold bg-red-600 hover:bg-red-500"
-            >
-              Logout
-            </button>
-          </div>
+
+          <button
+            onClick={logout}
+            className="w-full rounded-2xl py-3 font-semibold bg-red-600 hover:bg-red-500"
+          >
+            Logout
+          </button>
         </div>
       </div>
     </main>
