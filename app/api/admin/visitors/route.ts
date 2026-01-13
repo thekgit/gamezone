@@ -5,59 +5,53 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET() {
+export async function POST(req: Request) {
   try {
     if (!assertAdmin()) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const body = await req.json().catch(() => ({}));
+    const session_id = String(body?.session_id || "").trim();
+    if (!session_id) {
+      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    }
+
     const admin = supabaseAdmin();
 
-    const { data, error } = await admin
+    // ✅ Use REAL columns you already use elsewhere: ends_at, ended_at, status
+    const { data: s, error } = await admin
       .from("sessions")
-      .select(
-        `
-        id,
-        created_at,
-        status,
-        players,
-        started_at,
-        ends_at,
-        ended_at,
-        visitor_name,
-        visitor_phone,
-        visitor_email,
-        games:game_id ( name )
-      `
-      )
-      .order("created_at", { ascending: false })
-      .limit(9999);
+      .select("id, ends_at, ended_at, status")
+      .eq("id", session_id)
+      .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    const rows =
-      (data || []).map((s: any) => ({
-        id: s.id,
-        created_at: s.created_at,
+    // already ended => ok
+    if (s.ended_at || String(s.status || "").toLowerCase() === "ended") {
+      return NextResponse.json({ ok: true }, { status: 200 });
+    }
 
-        // ✅ THESE are the fields your UI shows in Visitors tab:
-        full_name: s.visitor_name ?? null,
-        phone: s.visitor_phone ?? null,
-        email: s.visitor_email ?? null,
+    const now = new Date();
+    const slotEnd = s.ends_at ? new Date(s.ends_at) : null;
 
-        game_name: s?.games?.name ?? null,
+    // exit time rule: min(now, ends_at)
+    const exit =
+      slotEnd && !isNaN(slotEnd.getTime()) && now > slotEnd ? slotEnd : now;
 
-        slot_start: s.started_at ?? null,
-        slot_end: s.ends_at ?? null,
+    const { error: updErr } = await admin
+      .from("sessions")
+      .update({
+        ended_at: exit.toISOString(),
+        status: "ended",
+      })
+      .eq("id", session_id);
 
-        // ✅ exact QR scan exit time (ended_at), fallback to ends_at if needed
-        exit_time: s.ended_at ?? null,
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
-        status: s.status ?? null,
-        players: s.players ?? null,
-      })) ?? [];
-
-    return NextResponse.json({ rows });
+    return NextResponse.json({ ok: true }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

@@ -50,7 +50,6 @@ export default function AdminDashboardClient() {
   const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
-  // End Session popup state
   const [endTarget, setEndTarget] = useState<Row | null>(null);
   const [ending, setEnding] = useState(false);
   const [endErr, setEndErr] = useState("");
@@ -58,7 +57,8 @@ export default function AdminDashboardClient() {
   const load = async () => {
     setMsg("");
     try {
-      const res = await fetch("/api/admin/sessions", { cache: "no-store" });
+      // ✅ IMPORTANT: use the route that already returns correct visitor fields
+      const res = await fetch("/api/admin/visitors", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setMsg(data?.error || "Failed to load");
@@ -90,7 +90,7 @@ export default function AdminDashboardClient() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
-  // Generate QR (UNCHANGED + SAFE)
+  // ✅ Generate QR (same as before)
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -140,7 +140,7 @@ export default function AdminDashboardClient() {
     }
   };
 
-  // End Session API call
+  // ✅ End Session
   const endSession = async (r: Row) => {
     setEndErr("");
     setEnding(true);
@@ -151,7 +151,6 @@ export default function AdminDashboardClient() {
         credentials: "include",
         body: JSON.stringify({
           session_id: r.id,
-          slot_end: r.slot_end,
         }),
       });
 
@@ -182,7 +181,6 @@ export default function AdminDashboardClient() {
 
       {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-      {/* TABLE */}
       <div className="overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-white/70">
@@ -233,9 +231,7 @@ export default function AdminDashboardClient() {
 
                   <td className="p-3">
                     {completed ? (
-                      <span className="text-green-400 font-semibold">
-                        Session Completed
-                      </span>
+                      <span className="text-green-400 font-semibold">Session Completed</span>
                     ) : (
                       <button
                         onClick={() => genQr(r)}
@@ -261,7 +257,6 @@ export default function AdminDashboardClient() {
         </table>
       </div>
 
-      {/* END SESSION MODAL */}
       {endTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
@@ -269,15 +264,13 @@ export default function AdminDashboardClient() {
               <div>
                 <div className="text-lg font-semibold">End this session?</div>
                 <div className="text-sm text-white/60 mt-1">
-                  Exit time will be set automatically.
+                  If slot time is already passed, exit time will be slot end. Otherwise exit time will be now.
                 </div>
               </div>
               <button onClick={() => setEndTarget(null)}>✕</button>
             </div>
 
-            {endErr && (
-              <div className="mt-3 text-red-300 text-sm">{endErr}</div>
-            )}
+            {endErr && <div className="mt-3 text-red-300 text-sm">{endErr}</div>}
 
             <div className="mt-4 flex gap-2">
               <button
