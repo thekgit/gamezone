@@ -57,7 +57,6 @@ export default function AdminDashboardClient() {
   const load = async () => {
     setMsg("");
     try {
-      // ✅ IMPORTANT: send cookies (admin auth) so assertAdmin passes
       const res = await fetch("/api/admin/visitors", {
         cache: "no-store",
         credentials: "include",
@@ -68,9 +67,10 @@ export default function AdminDashboardClient() {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
+
       setRows((data.rows || []) as Row[]);
-    } catch {
-      setMsg("Failed to load");
+    } catch (e: any) {
+      setMsg(e?.message ? `Failed to load: ${e.message}` : "Failed to load");
     }
   };
 
@@ -94,7 +94,7 @@ export default function AdminDashboardClient() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
-  // ✅ Generate QR (unchanged)
+  // ✅ Generate QR
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -105,17 +105,30 @@ export default function AdminDashboardClient() {
       const res = await fetch("/api/admin/exit-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ session_id }),
       });
 
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        setMsg(data?.error || "Failed to generate QR");
+        setMsg((data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`);
         return;
       }
 
-      const exit_url: string = data.exit_url;
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      const exit_url: string | undefined = data?.exit_url;
+      if (!exit_url || typeof exit_url !== "string") {
+        setMsg("exit_url missing from /api/admin/exit-code response");
+        return;
+      }
+
+      let dataUrl = "";
+      try {
+        dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      } catch (e: any) {
+        setMsg(`QR render failed: ${e?.message || "Unknown QR error"}`);
+        return;
+      }
 
       const label = [
         r.full_name || "(No name)",
@@ -139,12 +152,14 @@ export default function AdminDashboardClient() {
         const withoutThis = prev.filter((x) => x.session_id !== session_id);
         return [item, ...withoutThis];
       });
+    } catch (e: any) {
+      setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
       setGenerating((g) => ({ ...g, [session_id]: false }));
     }
   };
 
-  // ✅ End Session
+  // ✅ End Session (THIS WAS MISSING in your pasted file; causes red underline)
   const endSession = async (r: Row) => {
     setEndErr("");
     setEnding(true);
@@ -153,14 +168,12 @@ export default function AdminDashboardClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          session_id: r.id,
-        }),
+        body: JSON.stringify({ session_id: r.id }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setEndErr(data?.error || "Failed to end session");
+        setEndErr((data?.error || "Failed to end session") + ` (HTTP ${res.status})`);
         return false;
       }
       return true;
@@ -184,6 +197,35 @@ export default function AdminDashboardClient() {
       </div>
 
       {msg && <div className="text-red-300 text-sm">{msg}</div>}
+
+      {/* ✅ QR PANEL (shows generated QRs like before) */}
+      {qrs.length > 0 && (
+        <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="font-semibold mb-3">Active Exit QRs</div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {qrs.map((q) => (
+              <div
+                key={q.session_id}
+                className="rounded-xl border border-white/10 bg-black/30 p-3"
+              >
+                <div className="text-sm font-semibold">{q.label}</div>
+                <div className="text-xs text-white/50 mt-1">
+                  Generated: {q.generatedAt}
+                </div>
+
+                <div className="mt-3 flex justify-center">
+                  <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
+                </div>
+
+                <div className="mt-2 text-xs text-white/40 break-all">
+                  Session: {q.session_id}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
@@ -235,7 +277,9 @@ export default function AdminDashboardClient() {
 
                   <td className="p-3">
                     {completed ? (
-                      <span className="text-green-400 font-semibold">Session Completed</span>
+                      <span className="text-green-400 font-semibold">
+                        Session Completed
+                      </span>
                     ) : (
                       <button
                         onClick={() => genQr(r)}
@@ -287,7 +331,7 @@ export default function AdminDashboardClient() {
 
               <button
                 onClick={async () => {
-                  const target = endTarget; // ✅ stable reference
+                  const target = endTarget;
                   if (!target) return;
 
                   const ok = await endSession(target);
