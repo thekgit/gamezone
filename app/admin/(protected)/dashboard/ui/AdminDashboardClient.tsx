@@ -105,17 +105,30 @@ export default function AdminDashboardClient() {
       const res = await fetch("/api/admin/exit-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ session_id }),
       });
 
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        setMsg(data?.error || "Failed to generate QR");
+        setMsg((data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`);
         return;
       }
 
-      const exit_url: string = data.exit_url;
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      const exit_url: string | undefined = data?.exit_url;
+      if (!exit_url || typeof exit_url !== "string") {
+        setMsg("exit_url missing from /api/admin/exit-code response");
+        return;
+      }
+
+      let dataUrl = "";
+      try {
+        dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      } catch (e: any) {
+        setMsg(`QR render failed: ${e?.message || "Unknown QR error"}`);
+        return;
+      }
 
       const label = [
         r.full_name || "(No name)",
@@ -139,11 +152,12 @@ export default function AdminDashboardClient() {
         const withoutThis = prev.filter((x) => x.session_id !== session_id);
         return [item, ...withoutThis];
       });
+    } catch (e: any) {
+      setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
       setGenerating((g) => ({ ...g, [session_id]: false }));
     }
   };
-
 
   // ✅ End Session (THIS WAS MISSING in your pasted file; causes red underline)
   const endSession = async (r: Row) => {
