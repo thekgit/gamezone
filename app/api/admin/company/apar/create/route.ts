@@ -59,20 +59,29 @@ export async function POST(req: Request) {
 
     const existing = (listRes?.users || []).find((u) => (u.email || "").toLowerCase() === email);
 
-    // If exists -> DO NOT reset password. Just ensure profile row exists safely.
+    // ✅ If exists -> SET/RESET password to NEW12345 so login always works
     if (existing?.id) {
       const uid = existing.id;
 
-      // Try read profile to preserve flags if exists
-      const { data: prof } = await admin
-        .from("profiles")
-        .select("user_id, password_set, must_change_password")
-        .eq("user_id", uid)
-        .maybeSingle();
+      // ✅ Reset password to NEW12345 (restore old behavior)
+      const { error: updAuthErr } = await admin.auth.admin.updateUserById(uid, {
+        password: "NEW12345",
+        email_confirm: true,
+        user_metadata: {
+          must_change_password: true,
+          company_key,
+          company,
+          employee_id,
+          full_name,
+          phone,
+        },
+      });
 
-      const password_set = prof?.password_set === true ? true : true; // safest for existing
-      const must_change_password = prof?.must_change_password === true ? true : false;
+      if (updAuthErr) {
+        return NextResponse.json({ error: updAuthErr.message }, { status: 500 });
+      }
 
+      // Ensure profile row exists + mark password_set true
       const { error: profErr } = await admin.from("profiles").upsert(
         {
           user_id: uid,
@@ -81,8 +90,8 @@ export async function POST(req: Request) {
           email,
           employee_id,
           company,
-          must_change_password,
-          password_set,
+          must_change_password: true,
+          password_set: true,
         },
         { onConflict: "user_id" }
       );
@@ -92,7 +101,8 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         created_auth: false,
-        message: "User already exists. Kept as-is (password not reset).",
+        user_id: uid,
+        message: "User already existed. Password reset to NEW12345.",
       });
     }
 
@@ -116,7 +126,7 @@ export async function POST(req: Request) {
     const uid = created?.user?.id;
     if (!uid) return NextResponse.json({ error: "User id missing after create." }, { status: 500 });
 
-    // 4) Create profile for NEW user (password not set yet)
+    // 4) Create profile for NEW user
     const { error: profErr } = await admin.from("profiles").upsert(
       {
         user_id: uid,
@@ -126,7 +136,7 @@ export async function POST(req: Request) {
         employee_id,
         company,
         must_change_password: true,
-        password_set: false,
+        password_set: true, // ✅ since we just set it to NEW12345
       },
       { onConflict: "user_id" }
     );
@@ -143,3 +153,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
+

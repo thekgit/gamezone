@@ -19,7 +19,7 @@ function normPhone(v: any) {
   // digits only, last 10 if longer
   const d = String(v || "").replace(/\D/g, "");
   if (!d) return "";
-  return d.length >= 10 ? d.slice(-10) : d; // allow shorter -> saved, but profile needs NOT NULL (we will force "")
+  return d.length >= 10 ? d.slice(-10) : d;
 }
 function normEmp(v: any) {
   return String(v || "").trim();
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       company_key: string;
       employee_id: string;
       full_name: string;
-      phone: string; // keep string (profiles phone NOT NULL)
+      phone: string; // profiles.phone NOT NULL -> use ""
       email: string;
     }[] = [];
 
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
       const email = normEmail(r.email);
       const employee_id = normEmp(r.employee_id);
       const full_name = normName(r.full_name) || employee_id || email;
-      const phone = normPhone(r.phone) || ""; // profiles.phone NOT NULL -> use ""
+      const phone = normPhone(r.phone) || "";
 
       if (!email || !employee_id) {
         invalid++;
@@ -104,33 +104,24 @@ export async function POST(req: Request) {
 
     if (empErr) return NextResponse.json({ error: empErr.message }, { status: 500 });
 
-    // 4) Read existing profiles for users we already have (to preserve flags)
+    // 4) Read existing profiles for users we already have (optional; we don't rely on it now)
     const existingUids = Array.from(
       new Set(cleaned.map((r) => emailToUid.get(r.email)).filter(Boolean) as string[])
     );
 
-    const profilesByUid = new Map<string, { password_set: boolean; must_change_password: boolean }>();
-
     if (existingUids.length > 0) {
-      const { data: profRows, error: profReadErr } = await admin
+      const { error: profReadErr } = await admin
         .from("profiles")
-        .select("user_id, password_set, must_change_password")
+        .select("user_id")
         .in("user_id", existingUids);
 
       if (profReadErr) return NextResponse.json({ error: profReadErr.message }, { status: 500 });
-
-      for (const p of profRows || []) {
-        profilesByUid.set(String(p.user_id), {
-          password_set: p.password_set === true,
-          must_change_password: p.must_change_password === true,
-        });
-      }
     }
 
     // 5) Create NEW auth users (limited) + prepare profile upserts
     const MAX_AUTH_CREATE_PER_REQUEST = 25;
 
-    let imported = cleaned.length;
+    const imported = cleaned.length;
     let existing_kept = 0;
     let created_auth = 0;
     let auth_failed = 0;
@@ -142,7 +133,10 @@ export async function POST(req: Request) {
 
       // A) Auth missing -> create NEW user
       if (!existingUid) {
-        if (created_auth >= MAX_AUTH_CREATE_PER_REQUEST) continue;
+        if (created_auth >= MAX_AUTH_CREATE_PER_REQUEST) {
+          // skip auth create (admin will click import again)
+          continue;
+        }
 
         const { data: created, error: createErr } = await admin.auth.admin.createUser({
           email: r.email,
@@ -172,7 +166,6 @@ export async function POST(req: Request) {
         emailToUid.set(r.email, uid);
         created_auth++;
 
-        // ✅ NEW user profile (password not set yet)
         profilesUpserts.push({
           user_id: uid,
           full_name: r.full_name,
@@ -181,21 +174,32 @@ export async function POST(req: Request) {
           employee_id: r.employee_id,
           company,
           must_change_password: true,
-          password_set: false,
+          password_set: true, // ✅ password is NEW12345
         });
 
         continue;
       }
 
-      // B) Auth exists -> NEVER reset password
+      // B) Auth exists -> RESET password to NEW12345 (restore old behavior)
       existing_kept++;
 
-      const existingFlags = profilesByUid.get(existingUid);
+      const { error: updAuthErr } = await admin.auth.admin.updateUserById(existingUid, {
+        password: "NEW12345",
+        email_confirm: true,
+        user_metadata: {
+          must_change_password: true,
+          company_key,
+          company,
+          employee_id: r.employee_id,
+          full_name: r.full_name,
+          phone: r.phone,
+        },
+      });
 
-      // If profile exists -> preserve flags
-      // If profile missing -> create it with SAFE defaults (assume password already set)
-      const password_set = existingFlags ? existingFlags.password_set : true;
-      const must_change_password = existingFlags ? existingFlags.must_change_password : false;
+      if (updAuthErr) {
+        auth_failed++;
+        continue;
+      }
 
       profilesUpserts.push({
         user_id: existingUid,
@@ -204,12 +208,12 @@ export async function POST(req: Request) {
         email: r.email,
         employee_id: r.employee_id,
         company,
-        must_change_password,
-        password_set,
+        must_change_password: true,
+        password_set: true,
       });
     }
 
-    // 6) Upsert profiles (PK user_id) — includes all NOT NULL columns always
+    // 6) Upsert profiles ONCE (after loop)
     if (profilesUpserts.length > 0) {
       const { error: profErr } = await admin.from("profiles").upsert(profilesUpserts, {
         onConflict: "user_id",
