@@ -30,6 +30,15 @@ export default function HomePage() {
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // ✅ NEW: Logout handler
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      router.replace("/"); // -> https://k-e18b.vercel.app/
+    }
+  };
+
   const load = async () => {
     setMsg("");
     setLoading(true);
@@ -69,8 +78,15 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-black text-white px-4 py-10">
       <div className="mx-auto w-full max-w-3xl">
-        <h1 className="text-3xl font-bold">Welcome to the Game Zone</h1>
-        <p className="text-white/60 mt-2">Your active sessions are shown below.</p>
+        {/* ✅ Title row + Logout */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold">Welcome to the Game Zone</h1>
+            <p className="text-white/60 mt-2">Your active sessions are shown below.</p>
+          </div>
+
+          
+        </div>
 
         {msg && <div className="mt-4 text-sm text-red-400">{msg}</div>}
 
@@ -119,6 +135,14 @@ export default function HomePage() {
           >
             Slot Booking
           </Link>
+          <div className="mt-4">
+            <button
+              onClick={logout}
+              className="w-full rounded-2xl py-3 text-center font-semibold bg-red-600 hover:bg-red-500"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
     </main>
