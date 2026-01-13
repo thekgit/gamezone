@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-
-// ✅ ADD THIS IMPORT (this is the missing piece)
 import AparUsersClient from "../../../(panel)/ui/AparUsersClient";
 
 type Row = {
@@ -15,7 +13,6 @@ type Row = {
   email: string | null;
 
   game_name: string | null;
-
   players: number | null;
 
   slot_start: string | null;
@@ -52,6 +49,11 @@ export default function AdminDashboardClient() {
 
   const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
+
+  // ✅ NEW: End Session modal state
+  const [endTarget, setEndTarget] = useState<Row | null>(null);
+  const [ending, setEnding] = useState(false);
+  const [endErr, setEndErr] = useState("");
 
   const load = async () => {
     setMsg("");
@@ -137,12 +139,36 @@ export default function AdminDashboardClient() {
     }
   };
 
+  // ✅ NEW: Call API to end session
+  const endSession = async (session_id: string) => {
+    setEndErr("");
+    setEnding(true);
+    try {
+      const res = await fetch("/api/admin/visitors/end-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ session_id }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setEndErr(data?.error || "Failed to end session");
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      setEndErr(e?.message || "Failed to end session");
+      return false;
+    } finally {
+      setEnding(false);
+    }
+  };
+
   return (
     <div className="text-white space-y-6">
-      {/* ✅ NEW: APAR Import + Manual Create UI (shows ABOVE QR section) */}
       <AparUsersClient />
 
-      {/* Existing header */}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Visitors</h1>
@@ -196,6 +222,10 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Players</th>
               <th className="p-3 text-left">Slot</th>
               <th className="p-3 text-left">Exit Time</th>
+
+              {/* ✅ NEW COLUMN */}
+              <th className="p-3 text-left">End Session</th>
+
               <th className="p-3 text-left">QR</th>
             </tr>
           </thead>
@@ -223,6 +253,21 @@ export default function AdminDashboardClient() {
                   </td>
                   <td className="p-3">{t(r.exit_time)}</td>
 
+                  {/* ✅ End Session column */}
+                  <td className="p-3">
+                    {completed ? (
+                      <span className="text-green-400 font-semibold">Completed</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEndTarget(r)}
+                        className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
+                      >
+                        End Session
+                      </button>
+                    )}
+                  </td>
+
                   <td className="p-3">
                     {completed ? (
                       <span className="text-green-400 font-semibold">
@@ -244,7 +289,7 @@ export default function AdminDashboardClient() {
 
             {rows.length === 0 && (
               <tr>
-                <td className="p-4 text-white/60" colSpan={9}>
+                <td className="p-4 text-white/60" colSpan={10}>
                   No sessions found.
                 </td>
               </tr>
@@ -252,6 +297,61 @@ export default function AdminDashboardClient() {
           </tbody>
         </table>
       </div>
+
+      {/* ✅ End Session confirmation popup */}
+      {endTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-semibold">End this session?</div>
+                <div className="mt-1 text-sm text-white/60">
+                  Exit time will be set automatically (now if before slot end, otherwise slot end).
+                </div>
+              </div>
+
+              {/* X close */}
+              <button
+                onClick={() => setEndTarget(null)}
+                className="rounded-lg bg-white/10 px-3 py-1 hover:bg-white/15"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {endErr ? (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+                {endErr}
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setEndTarget(null)}
+                className="flex-1 rounded-xl bg-white/10 py-2.5 font-semibold hover:bg-white/15"
+                disabled={ending}
+              >
+                No
+              </button>
+
+              <button
+                onClick={async () => {
+                  const ok = await endSession(endTarget.id);
+                  if (!ok) return;
+
+                  setEndTarget(null);
+                  await load(); // ✅ refresh rows so Exit Time updates
+                }}
+                className="flex-1 rounded-xl bg-blue-600 py-2.5 font-semibold hover:bg-blue-500 disabled:opacity-50"
+                disabled={ending}
+              >
+                {ending ? "Ending..." : "Yes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
