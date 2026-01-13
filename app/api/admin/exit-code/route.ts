@@ -1,52 +1,61 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAdmin } from "@/lib/assertAdmin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function token(len = 12) {
-  return crypto.randomBytes(len).toString("hex");
-}
-
-function getBaseUrl(req: Request) {
-  const proto = req.headers.get("x-forwarded-proto") || "http";
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
-  return `${proto}://${host}`;
-}
-
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!assertAdmin()) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();
-    if (!session_id) return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+
+    if (!session_id) {
+      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    }
 
     const admin = supabaseAdmin();
 
-    // rotate token every time
-    const newExitToken = token(12);
-
-    const { data: s, error: upErr } = await admin
+    // ✅ Use ONLY columns that exist in your sessions table (based on your working visitors route)
+    const { data: s, error } = await admin
       .from("sessions")
-      .update({ exit_token: newExitToken })
+      .select("id, ended_at, status")
       .eq("id", session_id)
-      .select("id, exit_token")
       .single();
 
-    if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    const base = getBaseUrl(req);
+    // Don’t generate QR for ended sessions
+    if (s.ended_at || String(s.status || "").toLowerCase() === "ended") {
+      return NextResponse.json({ error: "Session already ended" }, { status: 400 });
+    }
 
-    // QR opens exit page with sid + token
-    const exit_url = `${base}/exit?session_id=${encodeURIComponent(s.id)}&token=${encodeURIComponent(
-      s.exit_token
-    )}`;
+    // ✅ Build exit URL robustly
+    const base =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "";
 
-    return NextResponse.json({ ok: true, exit_url });
+    if (!base) {
+      return NextResponse.json(
+        { error: "Missing NEXT_PUBLIC_SITE_URL (or NEXT_PUBLIC_APP_URL)" },
+        { status: 500 }
+      );
+    }
+
+    const exit_url =
+      `${base.replace(/\/$/, "")}/exit?session_id=${encodeURIComponent(session_id)}`;
+
+    return NextResponse.json({ exit_url }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }
