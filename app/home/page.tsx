@@ -102,13 +102,6 @@ export default function HomePage() {
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Active Sessions</h2>
-            <button
-              onClick={load}
-              disabled={loading}
-              className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15 disabled:opacity-50"
-            >
-              {loading ? "Refreshing..." : "Refresh"}
-            </button>
           </div>
 
           {sessions.length === 0 ? (
