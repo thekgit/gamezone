@@ -90,8 +90,8 @@ export default function HomePage() {
         {/* ✅ Title row + Logout */}
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold">Welcome to the Game Zone</h1>
-            <p className="text-white/60 mt-2">Your active sessions are shown below.</p>
+            <h1 className="text-3xl text-center font-bold">Welcome to the Game Zone</h1>
+            <p className="text-center text-white/60 mt-2">Your active sessions are shown below.</p>
           </div>
 
           
@@ -101,7 +101,7 @@ export default function HomePage() {
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
-            <h2 className="text-center font-semibold">Active Sessions</h2>
+            <h2 className="text-lg text-center font-semibold">Active Sessions</h2>
           </div>
 
           {sessions.length === 0 ? (
@@ -112,16 +112,16 @@ export default function HomePage() {
                 <div key={s.id} className="rounded-xl border border-white/10 bg-black/30 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-semibold">{s.game_name || "Game"}</div>
-                    <div className="text-xs px-3 py-1 rounded-full bg-green-600/20 text-green-300 border border-green-500/30">
+                    <div className="text-xs text-center px-3 py-1 rounded-full bg-green-600/20 text-green-300 border border-green-500/30">
                       Active
                     </div>
                   </div>
 
                   <div className="mt-2 text-sm text-white/70">
-                    Players: <span className="text-white">{s.players ?? "-"}</span>
+                    Players: <span className="text-center text-white">{s.players ?? "-"}</span>
                   </div>
 
-                  <div className="mt-1 text-sm text-white/70">
+                  <div className="mt-1 text-sm text-center text-white/70">
                     Time: <span className="text-white">{t(s.started_at)} – {t(s.ends_at)}</span>
                   </div>
                 </div>
