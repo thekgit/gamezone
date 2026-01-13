@@ -32,7 +32,8 @@ export async function POST(req: Request) {
     if (!r) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
     // if already ended, return ok (idempotent)
-    if (r.exit_time || String(r.status || "").toLowerCase() === "ended") {
+    const st = String(r.status || "").toLowerCase();
+    if (r.exit_time || st === "ended" || st === "completed") {
       return NextResponse.json({ ok: true, exit_time: r.exit_time }, { status: 200 });
     }
 

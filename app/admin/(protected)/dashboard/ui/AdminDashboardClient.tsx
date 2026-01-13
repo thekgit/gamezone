@@ -50,7 +50,7 @@ export default function AdminDashboardClient() {
   const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
-  // ✅ NEW: End Session modal state
+  // End Session popup state
   const [endTarget, setEndTarget] = useState<Row | null>(null);
   const [ending, setEnding] = useState(false);
   const [endErr, setEndErr] = useState("");
@@ -90,6 +90,7 @@ export default function AdminDashboardClient() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
+  // Generate QR (UNCHANGED + SAFE)
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -100,7 +101,7 @@ export default function AdminDashboardClient() {
       const res = await fetch("/api/admin/exit-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id, slot_end: endTarget?.slot_end }),
+        body: JSON.stringify({ session_id }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -139,9 +140,8 @@ export default function AdminDashboardClient() {
     }
   };
 
-  // ✅ NEW: Call API to end session
+  // End Session API call
   const endSession = async (r: Row) => {
-    const session_id = r.id;
     setEndErr("");
     setEnding(true);
     try {
@@ -149,7 +149,10 @@ export default function AdminDashboardClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ session_id, slot_end: r.slot_end }),
+        body: JSON.stringify({
+          session_id: r.id,
+          slot_end: r.slot_end,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -170,48 +173,17 @@ export default function AdminDashboardClient() {
     <div className="text-white space-y-6">
       <AparUsersClient />
 
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Visitors</h1>
-          <p className="text-white/60 text-sm">
-            Active sessions timeline + Generate Exit QR.
-          </p>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold">Visitors</h1>
+        <p className="text-white/60 text-sm">
+          Active sessions timeline + Generate Exit QR.
+        </p>
       </div>
 
-      {msg && <div className="mt-3 text-red-300 text-sm">{msg}</div>}
-
-      {/* MULTI-QR BOARD */}
-      {qrs.length > 0 && (
-        <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="font-semibold mb-3">Active Exit QRs</div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {qrs.map((q) => (
-              <div
-                key={q.session_id}
-                className="rounded-xl border border-white/10 bg-black/30 p-3"
-              >
-                <div className="text-sm font-semibold">{q.label}</div>
-                <div className="text-xs text-white/50 mt-1">
-                  Generated: {q.generatedAt}
-                </div>
-
-                <div className="mt-3 flex justify-center">
-                  <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
-                </div>
-
-                <div className="mt-2 text-xs text-white/40 break-all">
-                  Session: {q.session_id}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
       {/* TABLE */}
-      <div className="mt-6 overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
+      <div className="overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-white/70">
             <tr>
@@ -223,10 +195,7 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Players</th>
               <th className="p-3 text-left">Slot</th>
               <th className="p-3 text-left">Exit Time</th>
-
-              {/* ✅ NEW COLUMN */}
               <th className="p-3 text-left">End Session</th>
-
               <th className="p-3 text-left">QR</th>
             </tr>
           </thead>
@@ -237,30 +206,23 @@ export default function AdminDashboardClient() {
                 (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
 
               return (
-                <tr
-                  key={r.id}
-                  className="border-t border-white/10 hover:bg-white/5"
-                >
+                <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                   <td className="p-3">{dt(r.created_at)}</td>
                   <td className="p-3">{r.full_name || "-"}</td>
                   <td className="p-3">{r.phone || "-"}</td>
                   <td className="p-3">{r.email || "-"}</td>
                   <td className="p-3">{r.game_name || "-"}</td>
-                  <td className="p-3">
-                    {typeof r.players === "number" ? r.players : "-"}
-                  </td>
+                  <td className="p-3">{r.players ?? "-"}</td>
                   <td className="p-3">
                     {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
                   </td>
                   <td className="p-3">{t(r.exit_time)}</td>
 
-                  {/* ✅ End Session column */}
                   <td className="p-3">
                     {completed ? (
                       <span className="text-green-400 font-semibold">Completed</span>
                     ) : (
                       <button
-                        type="button"
                         onClick={() => setEndTarget(r)}
                         className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
                       >
@@ -278,7 +240,7 @@ export default function AdminDashboardClient() {
                       <button
                         onClick={() => genQr(r)}
                         disabled={!!generating[r.id]}
-                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
                       >
                         {generating[r.id] ? "Generating..." : "Generate QR"}
                       </button>
@@ -299,52 +261,40 @@ export default function AdminDashboardClient() {
         </table>
       </div>
 
-      {/* ✅ End Session confirmation popup */}
+      {/* END SESSION MODAL */}
       {endTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white shadow-xl">
-            <div className="flex items-start justify-between gap-3">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
+            <div className="flex justify-between items-start">
               <div>
                 <div className="text-lg font-semibold">End this session?</div>
-                <div className="mt-1 text-sm text-white/60">
-                  Exit time will be set automatically (now if before slot end, otherwise slot end).
+                <div className="text-sm text-white/60 mt-1">
+                  Exit time will be set automatically.
                 </div>
               </div>
-
-              {/* X close */}
-              <button
-                onClick={() => setEndTarget(null)}
-                className="rounded-lg bg-white/10 px-3 py-1 hover:bg-white/15"
-                aria-label="Close"
-              >
-                ✕
-              </button>
+              <button onClick={() => setEndTarget(null)}>✕</button>
             </div>
 
-            {endErr ? (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
-                {endErr}
-              </div>
-            ) : null}
+            {endErr && (
+              <div className="mt-3 text-red-300 text-sm">{endErr}</div>
+            )}
 
             <div className="mt-4 flex gap-2">
               <button
                 onClick={() => setEndTarget(null)}
-                className="flex-1 rounded-xl bg-white/10 py-2.5 font-semibold hover:bg-white/15"
+                className="flex-1 rounded-xl bg-white/10 py-2.5 font-semibold"
                 disabled={ending}
               >
                 No
               </button>
-
               <button
                 onClick={async () => {
-                  const ok = await endSession(endTarget.id);
+                  const ok = await endSession(endTarget);
                   if (!ok) return;
-
                   setEndTarget(null);
-                  await load(); // ✅ refresh rows so Exit Time updates
+                  await load();
                 }}
-                className="flex-1 rounded-xl bg-blue-600 py-2.5 font-semibold hover:bg-blue-500 disabled:opacity-50"
+                className="flex-1 rounded-xl bg-blue-600 py-2.5 font-semibold disabled:opacity-50"
                 disabled={ending}
               >
                 {ending ? "Ending..." : "Yes"}
