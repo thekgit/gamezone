@@ -5,60 +5,103 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// map possible real DB columns for "end time" (exit)
+const END_TIME_CANDIDATES = [
+  "exit_time",
+  "exit_at",
+  "ended_at",
+  "end_time",
+  "end_at",
+  "checkout_time",
+  "checkout_at",
+];
+
+const STATUS_CANDIDATES = ["status", "state", "session_status"];
+
+function pickExistingKey(obj: any, keys: string[]) {
+  if (!obj) return null;
+  for (const k of keys) if (k in obj) return k;
+  return null;
+}
+
 export async function GET() {
   try {
     if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
 
+    /**
+     * IMPORTANT:
+     * - sessions table likely has: id, created_at, user_id, game_id, players, slot_start, slot_end, status, ended_at...
+     * - profiles table likely keyed by user_id
+     * - games table likely keyed by id
+     *
+     * If your FK names differ, only the join aliases need adjusting.
+     * This avoids selecting non-existing "exit_time" column.
+     */
     const { data, error } = await admin
       .from("sessions")
-      .select(
-        `
+      .select(`
         id,
         created_at,
-        status,
         players,
-        started_at,
+        user_id,
+        game_id,
+        slot_start,
+        slot_end,
+        status,
+        state,
+        session_status,
         ended_at,
-        ends_at,
-        start_time,
+        exit_at,
         end_time,
-        visitor_name,
-        visitor_phone,
-        visitor_email,
-        games:game_id ( name )
-      `
-      )
-      .order("created_at", { ascending: false })
-      .limit(9999);
+        end_at,
+        checkout_time,
+        checkout_at,
+        profiles:profiles!sessions_user_id_fkey (
+          full_name,
+          phone,
+          email
+        ),
+        games:games!sessions_game_id_fkey (
+          name
+        )
+      `)
+      .order("created_at", { ascending: false });
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
+    }
 
-    const rows = (data || []).map((s: any) => ({
-      id: s.id,
-      created_at: s.created_at,
+    const rows = (data ?? []).map((r: any) => {
+      const endCol = pickExistingKey(r, END_TIME_CANDIDATES);
+      const statusCol = pickExistingKey(r, STATUS_CANDIDATES);
 
-      full_name: s.visitor_name ?? null,
-      phone: s.visitor_phone ?? null,
-      email: s.visitor_email ?? null,
+      return {
+        id: r.id,
+        created_at: r.created_at ?? null,
 
-      game_name: s?.games?.name ?? null,
+        full_name: r.profiles?.full_name ?? null,
+        phone: r.profiles?.phone ?? null,
+        email: r.profiles?.email ?? null,
 
-      slot_start: s.started_at ?? s.start_time ?? null,
-      slot_end: s.ends_at ?? s.end_time ?? null,
+        game_name: r.games?.name ?? null,
+        players: r.players ?? null,
 
-      // ✅ UI field: exact QR scan time
-      exit_time: s.ended_at ?? null,
+        slot_start: r.slot_start ?? null,
+        slot_end: r.slot_end ?? null,
 
-      status: s.status ?? null,
-      players: s.players ?? null,
-    }));
+        status: statusCol ? r[statusCol] : null,
 
-    return NextResponse.json({ rows });
+        // ✅ UI expects this name, but we derive it safely
+        exit_time: endCol ? r[endCol] : null,
+      };
+    });
+
+    return NextResponse.json({ rows }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
   }
 }
