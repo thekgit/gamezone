@@ -5,54 +5,62 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function POST(req: Request) {
+export async function GET() {
   try {
     if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await req.json().catch(() => ({}));
-    const session_id = String(body?.session_id || "").trim();
-    if (!session_id) {
-      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+      return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
 
-    // ✅ Use REAL columns you already use elsewhere: ends_at, ended_at, status
-    const { data: s, error } = await admin
+    const { data, error } = await admin
       .from("sessions")
-      .select("id, ends_at, ended_at, status")
-      .eq("id", session_id)
-      .single();
+      .select(
+        `
+        id,
+        created_at,
+        status,
+        players,
+        started_at,
+        ends_at,
+        ended_at,
+        visitor_name,
+        visitor_phone,
+        visitor_email,
+        games:game_id ( name )
+      `
+      )
+      .order("created_at", { ascending: false })
+      .limit(9999);
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-
-    // already ended => ok
-    if (s.ended_at || String(s.status || "").toLowerCase() === "ended") {
-      return NextResponse.json({ ok: true }, { status: 200 });
+    if (error) {
+      return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
     }
 
-    const now = new Date();
-    const slotEnd = s.ends_at ? new Date(s.ends_at) : null;
+    const rows =
+      (data || []).map((s: any) => ({
+        id: s.id,
+        created_at: s.created_at ?? null,
 
-    // exit time rule: min(now, ends_at)
-    const exit =
-      slotEnd && !isNaN(slotEnd.getTime()) && now > slotEnd ? slotEnd : now;
+        full_name: s.visitor_name ?? null,
+        phone: s.visitor_phone ?? null,
+        email: s.visitor_email ?? null,
 
-    const { error: updErr } = await admin
-      .from("sessions")
-      .update({
-        ended_at: exit.toISOString(),
-        status: "ended",
-      })
-      .eq("id", session_id);
+        game_name: s?.games?.name ?? null,
+        players: s.players ?? null,
 
-    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+        slot_start: s.started_at ?? null,
+        slot_end: s.ends_at ?? null,
 
-    return NextResponse.json({ ok: true }, { status: 200 });
+        exit_time: s.ended_at ?? null,
+        status: s.status ?? null,
+      })) ?? [];
+
+    return NextResponse.json({ rows }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error", rows: [] },
+      { status: 500 }
+    );
   }
 }
