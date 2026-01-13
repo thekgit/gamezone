@@ -1,15 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
-import Link from "next/link";
-import { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 import { useRouter, useSearchParams } from "next/navigation";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export default function LoginClient() {
   const router = useRouter();
@@ -17,6 +11,16 @@ export default function LoginClient() {
 
   // after login, default landing page
   const next = searchParams.get("next") || "/home";
+
+  // ✅ If already logged in, go directly to /home (or next)
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        router.replace(next);
+      }
+    })();
+  }, [router, next]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,10 +74,18 @@ export default function LoginClient() {
   return (
     <main className="min-h-screen bg-black text-white px-4 flex items-center justify-center">
       <div className="w-full max-w-sm">
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6"
+        >
           <h1 className="text-3xl font-bold">Login</h1>
-          <p className="text-white/60 mt-2 text-sm">Please use your company-provided email ID for Login.</p>
-          <p className="text-white/60 mt-2 text-sm">Or use the email ID you provided to your company for signup.</p>
+          <p className="text-white/60 mt-2 text-sm">
+            Please use your company-provided email ID for Login.
+          </p>
+          <p className="text-white/60 mt-2 text-sm">
+            Or use the email ID you provided to your company for signup.
+          </p>
         </motion.div>
 
         <div className="space-y-3">
@@ -104,18 +116,13 @@ export default function LoginClient() {
         </button>
 
         <div className="mt-2 flex justify-end">
-          <a href="/forgot-password" className="text-sm text-blue-400 hover:text-blue-300">
+          <a
+            href="/forgot-password"
+            className="text-sm text-blue-400 hover:text-blue-300"
+          >
             Forgot password?
           </a>
         </div>
-        {/*
-        <div className="mt-4 text-sm text-white/60">
-          New here?{" "}
-          <Link className="text-white underline" href="/signup">
-            Create account
-          </Link>
-        </div>
-        */}
       </div>
     </main>
   );
