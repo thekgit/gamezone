@@ -51,6 +51,15 @@ export default function HomePage() {
         return;
       }
 
+      // ✅ EXTRA SAFETY CHECK (fixes mobile issue)
+      const { data: userRes, error: uErr } = await supabase.auth.getUser();
+
+      if (uErr || !userRes?.user) {
+        await supabase.auth.signOut();
+        router.replace("/login?next=/home");
+        return;
+      }
+
       const res = await fetch("/api/sessions/active", {
         cache: "no-store",
         headers: { Authorization: `Bearer ${jwt}` },

@@ -15,8 +15,10 @@ export default function LoginClient() {
   // ✅ If already logged in, go directly to /home (or next)
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
+      // ✅ This verifies the session is REALLY valid
+      const { data, error } = await supabase.auth.getUser();
+  
+      if (!error && data?.user) {
         router.replace(next);
       }
     })();
