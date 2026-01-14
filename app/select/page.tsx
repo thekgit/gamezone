@@ -8,6 +8,8 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+
+// --- Types ---
 type PlayerHit = {
   user_id: string;
   full_name: string | null;
@@ -15,6 +17,7 @@ type PlayerHit = {
   email: string | null;
   employee_id: string | null;
 };
+
 type Game = {
   id: string;
   name: string;
@@ -22,85 +25,79 @@ type Game = {
   court_count: number;
   is_active?: boolean;
 };
-type PersonPick = {
-  user_id: string;
-  full_name: string;
-  email: string;
-  employee_id: string;
-  phone?: string;
-};
+
+function safeStr(v: any) {
+  return String(v ?? "").trim();
+}
+
+function uniqStrings(arr: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const a of arr) {
+    const s = safeStr(a);
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function clampInt(n: any, min: number, max: number) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return min;
+  return Math.max(min, Math.min(max, Math.floor(x)));
+}
+
 export default function SelectPage() {
   const router = useRouter();
-  
-  const [hits, setHits] = useState<PlayerHit[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [q, setQ] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<PersonPick[]>([]);
-  const [picked, setPicked] = useState<PersonPick[]>([]);
+
+  // --- Games state ---
   const [games, setGames] = useState<Game[]>([]);
   const [gameId, setGameId] = useState<string>("");
-  const [players, setPlayers] = useState<number>(1);
-  const searchPeople = async (text: string) => {
-    setQ(text);
-    if (text.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-  
-    setSearching(true);
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const jwt = sess?.session?.access_token;
-      if (!jwt) {
-        router.replace("/login?next=/select");
-        return;
-      }
-  
-      const res = await fetch(`/api/players/?q=${encodeURIComponent(text.trim())}`, {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${jwt}` },
-      });
-  
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setResults([]);
-        return;
-      }
-  
-      const list = (data.users || []) as PersonPick[];
-  
-      // remove already picked
-      const pickedIds = new Set(picked.map((p) => p.user_id));
-      setResults(list.filter((p) => !pickedIds.has(p.user_id)));
-    } finally {
-      setSearching(false);
-    }
-  };
-  const [msg, setMsg] = useState<string>("");
   const [loadingGames, setLoadingGames] = useState(false);
-  const [booking, setBooking] = useState(false);
 
+  // --- Booking / UI state ---
+  const [msg, setMsg] = useState<string>("");
+  const [booking, setBooking] = useState(false);
   const [slotFullOpen, setSlotFullOpen] = useState(false);
 
+  // --- Player add system state ---
+  const [q, setQ] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [hits, setHits] = useState<PlayerHit[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // ✅ Track latest selected game id to avoid stale closures
   const gameIdRef = useRef<string>("");
   useEffect(() => {
     gameIdRef.current = gameId;
   }, [gameId]);
 
+  // ✅ Track if user manually picked game (so refresh doesn't override)
   const userPickedGameRef = useRef(false);
 
-  const selectedGame = useMemo(
-    () => games.find((g) => g.id === gameId) || null,
-    [games, gameId]
-  );
+  // ✅ Derived selected game
+  const selectedGame = useMemo(() => {
+    return games.find((g) => g.id === gameId) || null;
+  }, [games, gameId]);
 
+  // ✅ Players count is now automatic:
+  // you (1) + added others (selectedIds length)
+  const computedPlayers = useMemo(() => {
+    const others = Array.isArray(selectedIds) ? selectedIds.length : 0;
+    return clampInt(1 + others, 1, 10); // keep max 10 like before
+  }, [selectedIds]);
+
+  // --- Load games ---
   const loadGames = async () => {
     setMsg("");
     setLoadingGames(true);
+
     try {
       const res = await fetch("/api/games", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
         setMsg(data?.error || "Failed to load games");
         return;
@@ -113,15 +110,19 @@ export default function SelectPage() {
 
       const currentSelected = gameIdRef.current;
 
+      // ✅ Auto select first if user did not pick yet
       if (!userPickedGameRef.current && !currentSelected && active.length > 0) {
         setGameId(active[0].id);
         return;
       }
 
+      // ✅ If selected game removed/inactive, fallback
       if (currentSelected && active.length > 0 && !active.some((g) => g.id === currentSelected)) {
         userPickedGameRef.current = false;
         setGameId(active[0].id);
       }
+    } catch (e: any) {
+      setMsg(e?.message || "Failed to load games");
     } finally {
       setLoadingGames(false);
     }
@@ -131,69 +132,113 @@ export default function SelectPage() {
     loadGames();
     const id = setInterval(loadGames, 5000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // --- Search players (debounced) ---
   useEffect(() => {
-    const id = setTimeout(async () => {
-      const term = q.trim();
+    const timer = setTimeout(async () => {
+      const term = safeStr(q);
       if (term.length < 2) {
         setHits([]);
         return;
       }
-  
+
       setSearching(true);
       try {
         const { data: sess } = await supabase.auth.getSession();
         const jwt = sess?.session?.access_token;
-  
+
         if (!jwt) {
+          // not logged in -> ignore silently, booking will redirect anyway
           setHits([]);
-          setMsg("Please login again.");
           return;
         }
-  
-        // ✅ IMPORTANT: correct endpoint for app/api/players/route.ts
-        const res = await fetch(`/api/players?q=${encodeURIComponent(term)}`, {
+
+        const res = await fetch(`/api/players/search?q=${encodeURIComponent(term)}`, {
           cache: "no-store",
           headers: { Authorization: `Bearer ${jwt}` },
         });
-  
+
         const data = await res.json().catch(() => ({}));
-  
         if (!res.ok) {
-          // ✅ show real error instead of silently "No matches"
-          setMsg(data?.error || `Search failed (HTTP ${res.status})`);
           setHits([]);
           return;
         }
-  
-        setMsg(""); // clear any old error
-  
-        const list: PlayerHit[] = Array.isArray(data.users) ? (data.users as PlayerHit[]) : [];
-  
-        // ✅ fix "red line on u" by ensuring list is typed
-        setHits(list.filter((u) => !selectedIds.includes(u.user_id)));
+
+        const list = Array.isArray(data.users) ? (data.users as PlayerHit[]) : [];
+
+        // ✅ exclude already selected ids
+        const sel = new Set(selectedIds);
+        const filtered = list.filter((u) => u?.user_id && !sel.has(u.user_id));
+
+        setHits(filtered);
+      } catch {
+        setHits([]);
       } finally {
         setSearching(false);
       }
     }, 250);
-  
-    return () => clearTimeout(id);
+
+    return () => clearTimeout(timer);
   }, [q, selectedIds]);
 
+  // --- Add/remove helper actions ---
+  const addPlayer = (u: PlayerHit) => {
+    const uid = safeStr(u?.user_id);
+    if (!uid) return;
+
+    setSelectedIds((prev) => {
+      const merged = uniqStrings([...prev, uid]);
+      // enforce max players 10 -> max other players = 9
+      const maxOther = 9;
+      return merged.slice(0, maxOther);
+    });
+
+    // Optional: clear search and close dropdown
+    setQ("");
+    setHits([]);
+  };
+
+  const removePlayerById = (uid: string) => {
+    const id = safeStr(uid);
+    if (!id) return;
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
+  };
+
+  const clearAllPlayers = () => {
+    setSelectedIds([]);
+    setHits([]);
+    setQ("");
+  };
+
+  // --- Booking ---
   const bookSlot = async () => {
     setMsg("");
     setSlotFullOpen(false);
 
-    if (!gameId || booking) return;
+    if (!gameId) {
+      setMsg("Please select a game.");
+      return;
+    }
 
+    if (booking) return;
     setBooking(true);
+
     try {
       const { data: sess } = await supabase.auth.getSession();
       const jwt = sess?.session?.access_token;
+
       if (!jwt) {
         router.replace("/login?next=/select");
         return;
       }
+
+      // ✅ automatic players
+      const players = computedPlayers;
+
+      // ✅ safety: player_user_ids = selectedIds (limited)
+      const player_user_ids = uniqStrings(selectedIds).slice(0, 9);
 
       const res = await fetch("/api/sessions/create", {
         method: "POST",
@@ -203,8 +248,8 @@ export default function SelectPage() {
         },
         body: JSON.stringify({
           game_id: gameId,
-          players,
-          player_user_ids: selectedIds, // ✅ add this
+          players, // ✅ AUTO
+          player_user_ids, // ✅ who you added
         }),
       });
 
@@ -212,15 +257,19 @@ export default function SelectPage() {
 
       if (!res.ok) {
         const err = String(data?.error || `Booking failed (${res.status})`);
+
         if (err.toUpperCase().includes("SLOT_FULL")) {
           setSlotFullOpen(true);
           return;
         }
+
         setMsg(err);
         return;
       }
 
       router.push("/entry");
+    } catch (e: any) {
+      setMsg(e?.message || "Booking failed");
     } finally {
       setBooking(false);
     }
@@ -234,7 +283,8 @@ export default function SelectPage() {
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b0b0b] p-5 text-center">
             <div className="text-lg font-bold">Slot Full</div>
             <div className="text-white/70 text-sm mt-2">
-              All slots for this game are currently booked.  
+              All slots for this game are currently booked.
+              <br />
               Please try another game or wait for a slot to free up.
             </div>
             <button
@@ -251,9 +301,7 @@ export default function SelectPage() {
       {/* MAIN CARD */}
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
         <div className="text-lg font-bold">Select Game</div>
-        <div className="text-white/60 text-sm mt-1">
-          Choose game & number of players.
-        </div>
+        <div className="text-white/60 text-sm mt-1">Choose game & add other players.</div>
 
         {msg && <div className="mt-3 text-sm text-red-400">{msg}</div>}
 
@@ -280,8 +328,7 @@ export default function SelectPage() {
           <div className="mt-2 text-xs text-white/50">
             {selectedGame ? (
               <>
-                Duration: {selectedGame.duration_minutes} mins • Slots:{" "}
-                {selectedGame.court_count}
+                Duration: {selectedGame.duration_minutes} mins • Slots: {selectedGame.court_count}
               </>
             ) : loadingGames ? (
               "Loading games..."
@@ -291,17 +338,37 @@ export default function SelectPage() {
           </div>
         </div>
 
-        {/* Players dropdown */}
-        
+        {/* ✅ AUTO PLAYERS (read-only) */}
+        <div className="mt-4 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
+          <div className="text-xs text-white/60">Players (Auto)</div>
+          <div className="text-lg font-bold mt-1">
+            {computedPlayers} Player{computedPlayers > 1 ? "s" : ""}
+          </div>
+          <div className="text-xs text-white/50 mt-1">
+            1 (You) + {selectedIds.length} added
+          </div>
+        </div>
+
         {/* Add other players */}
-        {/* Add other players */}
-        
-                 {/* Add other players */}
-        <div className="mt-4">
-          <label className="text-xs text-white/60">Add other players</label>
+        <div className="mt-4 text-left">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-white/60">Add other players</label>
+
+            {selectedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={clearAllPlayers}
+                disabled={booking}
+                className="text-xs text-white/50 hover:text-white underline"
+                title="Remove all added players"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
 
           <input
-            className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
+            className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none text-white"
             placeholder="Search by name, email, employee id..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -315,7 +382,8 @@ export default function SelectPage() {
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setSelectedIds((prev) => prev.filter((x) => x !== id))}
+                  onClick={() => removePlayerById(id)}
+                  disabled={booking}
                   className="text-xs rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10"
                   title="Remove"
                 >
@@ -325,12 +393,14 @@ export default function SelectPage() {
             </div>
           )}
 
-          {/* Results */}
+          {/* Results list */}
           <div className="mt-2 rounded-xl border border-white/10 bg-black/30 overflow-hidden">
             {searching ? (
               <div className="px-4 py-3 text-sm text-white/60">Searching...</div>
             ) : hits.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-white/60">No matches.</div>
+              <div className="px-4 py-3 text-sm text-white/60">
+                {q.trim().length >= 2 ? "No matches." : "Type 2+ characters to search."}
+              </div>
             ) : (
               hits.map((u) => (
                 <div
@@ -349,14 +419,10 @@ export default function SelectPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedIds((prev) =>
-                        prev.includes(u.user_id) ? prev : [...prev, u.user_id]
-                      );
-                      setQ("");       // optional: clear search
-                      setHits([]);    // optional: close list
-                    }}
-                    className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15"
+                    onClick={() => addPlayer(u)}
+                    disabled={booking || selectedIds.length >= 9} // max others
+                    className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15 disabled:opacity-40"
+                    title={selectedIds.length >= 9 ? "Max players reached" : "Add"}
                   >
                     + Add
                   </button>
@@ -364,7 +430,14 @@ export default function SelectPage() {
               ))
             )}
           </div>
+
+          {selectedIds.length >= 9 && (
+            <div className="mt-2 text-xs text-yellow-300">
+              Max players reached (10 total including you).
+            </div>
+          )}
         </div>
+
         {/* Book button */}
         <button
           type="button"
@@ -372,7 +445,7 @@ export default function SelectPage() {
           disabled={booking || !gameId}
           className="w-full mt-5 rounded-xl py-3 font-semibold bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {booking ? "Booking..." : "Book Slot"}
+          {booking ? "Booking..." : `Book Slot (${computedPlayers} Player${computedPlayers > 1 ? "s" : ""})`}
         </button>
       </div>
     </main>
