@@ -57,7 +57,7 @@ export default function SelectPage() {
         return;
       }
   
-      const res = await fetch(`/api/players/search?q=${encodeURIComponent(text.trim())}`, {
+      const res = await fetch(`/api/players/?q=${encodeURIComponent(text.trim())}`, {
         cache: "no-store",
         headers: { Authorization: `Bearer ${jwt}` },
       });
