@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// anon client ONLY to validate JWT
 function supabaseAnon() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,43 +22,53 @@ export async function GET(req: Request) {
       return NextResponse.json({ profiles: [] }, { status: 200 });
     }
 
-    // Require Bearer token
+    // ---- AUTH ----
     const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.toLowerCase().startsWith("bearer ")
+    const token = authHeader.startsWith("Bearer ")
       ? authHeader.slice(7).trim()
       : "";
 
     if (!token) {
-      return NextResponse.json({ error: "Missing auth token", profiles: [] }, { status: 401 });
+      return NextResponse.json(
+        { error: "Missing auth token", profiles: [] },
+        { status: 401 }
+      );
     }
 
-    // Validate token -> get current user id
     const anon = supabaseAnon();
     const { data: meRes, error: meErr } = await anon.auth.getUser(token);
 
     if (meErr || !meRes?.user?.id) {
-      return NextResponse.json({ error: "Invalid session", profiles: [] }, { status: 401 });
+      return NextResponse.json(
+        { error: "Invalid session", profiles: [] },
+        { status: 401 }
+      );
     }
 
-    const meId = meRes.user.id;
+    const myUserId = meRes.user.id;
 
-    // Search profiles (admin client)
+    // ---- SEARCH ----
     const admin = supabaseAdmin();
 
     const { data, error } = await admin
       .from("profiles")
       .select("user_id, full_name, email, employee_id, phone")
-      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,employee_id.ilike.%${q}%`)
+      .or(
+        `full_name.ilike.%${q}%,email.ilike.%${q}%,employee_id.ilike.%${q}%`
+      )
       .order("full_name", { ascending: true })
-      .limit(15);
+      .limit(20);
 
     if (error) {
-      return NextResponse.json({ error: error.message, profiles: [] }, { status: 500 });
+      return NextResponse.json(
+        { error: error.message, profiles: [] },
+        { status: 500 }
+      );
     }
 
-    // Hide current user from results
+    // ---- FILTER SELF ----
     const profiles = (data || [])
-      .filter((p: any) => String(p.user_id) !== String(meId))
+      .filter((p: any) => String(p.user_id) !== String(myUserId))
       .map((p: any) => ({
         user_id: p.user_id,
         full_name: p.full_name ?? "",
