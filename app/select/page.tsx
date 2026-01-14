@@ -134,45 +134,47 @@ export default function SelectPage() {
   }, []);
   useEffect(() => {
     const id = setTimeout(async () => {
-      //
       const term = q.trim();
       if (term.length < 2) {
         setHits([]);
         return;
       }
-
+  
       setSearching(true);
       try {
         const { data: sess } = await supabase.auth.getSession();
         const jwt = sess?.session?.access_token;
+  
         if (!jwt) {
           setHits([]);
+          setMsg("Please login again.");
           return;
         }
-
-        const res = await fetch(
-          `/api/players?q=${encodeURIComponent(term)}`,
-          {
-            cache: "no-store",
-            headers: {
-              Authorization: `Bearer ${jwt}`,
-            },
-          }
-        );
-
+  
+        // ✅ IMPORTANT: correct endpoint for app/api/players/route.ts
+        const res = await fetch(`/api/players?q=${encodeURIComponent(term)}`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${jwt}` },
+        });
+  
         const data = await res.json().catch(() => ({}));
+  
         if (!res.ok) {
+          // ✅ show real error instead of silently "No matches"
+          setMsg(data?.error || `Search failed (HTTP ${res.status})`);
           setHits([]);
           return;
         }
-
-        const list: PlayerHit[] = Array.isArray(data.users) ? data.users : [];
-        // remove already selected users
+  
+        setMsg(""); // clear any old error
+  
+        const list: PlayerHit[] = Array.isArray(data.users) ? (data.users as PlayerHit[]) : [];
+  
+        // ✅ fix "red line on u" by ensuring list is typed
         setHits(list.filter((u) => !selectedIds.includes(u.user_id)));
       } finally {
         setSearching(false);
       }
-      //
     }, 250);
   
     return () => clearTimeout(id);
