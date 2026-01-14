@@ -1,156 +1,187 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/**
- * POST { q: string }
- * Requires Authorization: Bearer <jwt>
- *
- * Returns:
- * { ok: true, results: [{ user_id, full_name, email, phone, employee_id }] }
- */
+function token(len = 16) {
+  return crypto.randomBytes(len).toString("hex");
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function addMinutesIso(iso: string, mins: number) {
+  const d = new Date(iso);
+  d.setMinutes(d.getMinutes() + mins);
+  return d.toISOString();
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const q = String(body?.q || "").trim();
 
-    if (!q || q.length < 2) {
-      return NextResponse.json({ ok: true, results: [] }, { status: 200 });
-    }
+    const game_id_from_client = String(body?.game_id || "").trim();
+    const game_legacy = String(body?.game || "").trim();
+    const players = Number(body?.players ?? 1);
 
+    // ✅ extra players (optional)
+    const rawOthers = Array.isArray(body?.player_user_ids) ? body.player_user_ids : [];
+    const player_user_ids = Array.from(
+      new Set(rawOthers.map((x: any) => String(x || "").trim()).filter(Boolean))
+    ).slice(0, 8);
+
+    // ✅ auth
     const auth = req.headers.get("authorization") || "";
     const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!jwt) {
-      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
-    }
+    if (!jwt) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
 
     const admin = supabaseAdmin();
 
-    // ✅ get current user from jwt (service role can do this)
-    const { data: userRes, error: uErr } = await admin.auth.getUser(jwt);
-    if (uErr || !userRes?.user?.id) {
+    // ✅ resolve user (MUST succeed)
+    const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
+    if (userErr || !userRes?.user?.id) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    const me = userRes.user;
-    const myUserId = me.id;
+    const user = userRes.user;
+    const user_id = user.id;
+    const email = (user.email || "").toLowerCase();
 
-    // try to determine company (from metadata OR profiles)
-    let company = String(me.user_metadata?.company || me.user_metadata?.company_key || "").trim();
+    // ✅ resolve game (by id OR legacy)
+    let gameRow: any = null;
 
-    if (!company) {
-      const { data: p } = await admin
-        .from("profiles")
-        .select("company")
-        .eq("user_id", myUserId)
+    if (game_id_from_client) {
+      const { data: g, error: gErr } = await admin
+        .from("games")
+        .select("id, name, duration_minutes, court_count, is_active")
+        .eq("id", game_id_from_client)
         .maybeSingle();
-      if (p?.company) company = String(p.company);
+
+      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
+      gameRow = g;
+    } else if (game_legacy) {
+      const { data: g2, error: g2Err } = await admin
+        .from("games")
+        .select("id, name, duration_minutes, court_count, is_active")
+        .ilike("name", game_legacy)
+        .maybeSingle();
+
+      if (g2Err) return NextResponse.json({ error: g2Err.message }, { status: 500 });
+      gameRow = g2;
     }
 
-    const like = `%${q}%`;
-
-    // ✅ 1) Search profiles (best source)
-    // NOTE: your schema uses profiles.user_id (NOT profiles.id)
-    let profilesRows: any[] = [];
-    {
-      const query = admin
-        .from("profiles")
-        .select("user_id, full_name, email, phone, employee_id, company")
-        .neq("user_id", myUserId)
-        .or(`full_name.ilike.${like},email.ilike.${like},employee_id.ilike.${like}`)
-        .limit(15);
-
-      if (company) query.eq("company", company);
-
-      const { data, error } = await query;
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-      profilesRows = data || [];
+    if (!gameRow?.id) return NextResponse.json({ error: "Game not found" }, { status: 400 });
+    if (gameRow.is_active === false) {
+      return NextResponse.json({ error: "Game is not active" }, { status: 400 });
     }
 
-    // ✅ 2) If profiles has results, return them
-    if (profilesRows.length > 0) {
-      return NextResponse.json(
-        {
-          ok: true,
-          results: profilesRows.map((r) => ({
-            user_id: r.user_id,
-            full_name: r.full_name ?? null,
-            email: r.email ?? null,
-            phone: r.phone ?? null,
-            employee_id: r.employee_id ?? null,
-          })),
-        },
-        { status: 200 }
-      );
+    const game_id = gameRow.id;
+    const duration_minutes = Number(gameRow.duration_minutes ?? 60);
+    const capacity = Math.max(1, Number(gameRow.court_count ?? 1));
+
+    const started_at_iso = nowIso();
+    const ends_at_iso = addMinutesIso(started_at_iso, duration_minutes);
+
+    // ✅ capacity check
+    const { count: activeCount, error: countErr } = await admin
+      .from("sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("game_id", game_id)
+      .is("ended_at", null)
+      .or("status.is.null,status.eq.active")
+      .gt("ends_at", started_at_iso);
+
+    if (countErr) return NextResponse.json({ error: countErr.message }, { status: 500 });
+
+    if ((activeCount ?? 0) >= capacity) {
+      return NextResponse.json({ error: "SLOT_FULL" }, { status: 409 });
     }
 
-    // ✅ 3) Fallback: search company_employees by company_key + query
-    // Then map email -> auth user_id (if auth exists)
-    let employees: any[] = [];
-    {
-      const query = admin
+    // ✅ visitor fields (FIX: profiles.user_id, not profiles.id)
+    let full_name: string | null = null;
+    let phone: string | null = null;
+
+    const { data: prof, error: profErr } = await admin
+      .from("profiles")
+      .select("full_name, phone")
+      .eq("user_id", user_id)
+      .maybeSingle();
+
+    if (profErr) {
+      // don't fail booking because of profile read
+      // (but we keep error visible for debugging)
+      console.error("profiles read error:", profErr.message);
+    } else {
+      if (prof?.full_name) full_name = prof.full_name;
+      if (prof?.phone) phone = prof.phone;
+    }
+
+    // fallback: company_employees by email
+    if (!full_name || !phone) {
+      const { data: emp, error: empErr } = await admin
         .from("company_employees")
-        .select("company_key, company, employee_id, full_name, phone, email")
-        .or(`full_name.ilike.${like},email.ilike.${like},employee_id.ilike.${like}`)
-        .limit(15);
+        .select("full_name, phone")
+        .eq("email", email)
+        .maybeSingle();
 
-      if (company) {
-        // some projects store it in company, some in company_key
-        query.or(`company.eq.${company},company_key.eq.${company}`);
-      }
+      if (empErr) console.error("company_employees read error:", empErr.message);
 
-      const { data, error } = await query;
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-      employees = data || [];
+      if (!full_name && emp?.full_name) full_name = emp.full_name;
+      if (!phone && emp?.phone) phone = emp.phone;
     }
 
-    if (!employees.length) {
-      return NextResponse.json({ ok: true, results: [] }, { status: 200 });
-    }
+    // fallback: auth metadata
+    const meta: any = user.user_metadata || {};
+    if (!full_name && meta.full_name) full_name = String(meta.full_name);
+    if (!phone && meta.phone) phone = String(meta.phone);
 
-    // Build email list
-    const emails = Array.from(
-      new Set(employees.map((e) => String(e.email || "").toLowerCase()).filter(Boolean))
-    );
+    // ✅ tokens
+    const entry_token = token(16);
+    const exit_token = token(16);
 
-    // Find auth users by listing (supabase admin API doesn’t support direct email search reliably)
-    const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
-      page: 1,
-      perPage: 2000,
-    });
-    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
+    // ✅ INSERT session (MUST happen)
+    const { data: created, error: insErr } = await admin
+      .from("sessions")
+      .insert({
+        user_id,
+        game_id,
+        players,
+        player_user_ids,
+        status: "active",
+        started_at: started_at_iso,
+        ends_at: ends_at_iso,
 
-    const emailToUid = new Map<string, string>();
-    for (const u of listRes?.users || []) {
-      const em = (u.email || "").toLowerCase();
-      if (em && u.id) emailToUid.set(em, u.id);
-    }
+        visitor_name: full_name || email || null,
+        visitor_phone: phone || null,
+        visitor_email: email || null,
 
-    const results = employees
-      .map((e) => {
-        const em = String(e.email || "").toLowerCase();
-        const uid = emailToUid.get(em);
-        if (!uid) return null; // if no auth user, can’t add as player_user_id
-        if (uid === myUserId) return null; // exclude self
-        return {
-          user_id: uid,
-          full_name: e.full_name ?? null,
-          email: e.email ?? null,
-          phone: e.phone ?? null,
-          employee_id: e.employee_id ?? null,
-        };
+        entry_token,
+        exit_token,
       })
-      .filter(Boolean)
-      .slice(0, 15);
+      .select("id, entry_token, exit_token")
+      .single();
 
-    return NextResponse.json({ ok: true, results }, { status: 200 });
+    if (insErr) {
+      console.error("sessions insert error:", insErr.message);
+      return NextResponse.json({ error: insErr.message }, { status: 500 });
+    }
+
+    if (!created?.id) {
+      return NextResponse.json({ error: "Session insert failed (id missing)" }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      message: "Slot has been created successfully",
+      session_id: created.id,
+      entry_token: created.entry_token,
+      exit_token: created.exit_token,
+    });
   } catch (e: any) {
+    console.error("create session fatal:", e?.message || e);
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
