@@ -111,40 +111,42 @@ export default function SelectPage() {
       setSearching(false);
       return;
     }
-
+  
     const timer = setTimeout(async () => {
       setSearching(true);
-      setMsg("");
       try {
         const { data: sess } = await supabase.auth.getSession();
         const jwt = sess?.session?.access_token;
-
+  
         if (!jwt) {
+          setMsg("Not logged in");
           setResults([]);
           return;
         }
-
+  
         const res = await fetch(`/api/profiles/search?q=${encodeURIComponent(term)}`, {
           cache: "no-store",
           headers: { Authorization: `Bearer ${jwt}` },
         });
-        
+  
         const data = await res.json().catch(() => ({}));
-        
+  
         if (!res.ok) {
           setMsg(data?.error || `Search failed (HTTP ${res.status})`);
           setResults([]);
           return;
         }
-        
+  
         setResults((data.profiles || []) as ProfilePick[]);
       } finally {
         setSearching(false);
       }
     }, 350);
-
+  
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
+    
 
   const addPick = (p: ProfilePick) => {
     setPicked((prev) => {
