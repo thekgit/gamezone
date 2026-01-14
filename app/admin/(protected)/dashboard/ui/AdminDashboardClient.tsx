@@ -308,14 +308,7 @@ export default function AdminDashboardClient() {
                   </td>
 
                   {/* ✅ NEW: Entry column delete */}
-                  <td className="p-3">
-                    <button
-                      onClick={() => setDeleteTarget(r)}
-                      className="rounded-lg bg-red-600 px-3 py-2 font-semibold hover:bg-red-500"
-                    >
-                      Delete
-                    </button>
-                  </td>
+                  
 
                   <td className="p-3">
                     {completed ? (
@@ -329,6 +322,14 @@ export default function AdminDashboardClient() {
                         {generating[r.id] ? "Generating..." : "Generate QR"}
                       </button>
                     )}
+                  </td>
+                  <td className="p-3">
+                    <button
+                      onClick={() => setDeleteTarget(r)}
+                      className="rounded-lg bg-red-600 px-3 py-2 font-semibold hover:bg-red-500"
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               );
