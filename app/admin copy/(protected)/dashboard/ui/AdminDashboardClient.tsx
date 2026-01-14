@@ -54,11 +54,6 @@ export default function AdminDashboardClient() {
   const [ending, setEnding] = useState(false);
   const [endErr, setEndErr] = useState("");
 
-  // ✅ NEW: Delete popup state
-  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteErr, setDeleteErr] = useState("");
-
   const load = async () => {
     setMsg("");
     try {
@@ -72,9 +67,10 @@ export default function AdminDashboardClient() {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
+
       setRows((data.rows || []) as Row[]);
-    } catch {
-      setMsg("Failed to load");
+    } catch (e: any) {
+      setMsg(e?.message ? `Failed to load: ${e.message}` : "Failed to load");
     }
   };
 
@@ -98,7 +94,7 @@ export default function AdminDashboardClient() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
-  // ✅ Generate QR (unchanged)
+  // ✅ Generate QR
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -126,7 +122,13 @@ export default function AdminDashboardClient() {
         return;
       }
 
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      let dataUrl = "";
+      try {
+        dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      } catch (e: any) {
+        setMsg(`QR render failed: ${e?.message || "Unknown QR error"}`);
+        return;
+      }
 
       const label = [
         r.full_name || "(No name)",
@@ -157,7 +159,7 @@ export default function AdminDashboardClient() {
     }
   };
 
-  // ✅ End Session (your existing behavior)
+  // ✅ End Session (THIS WAS MISSING in your pasted file; causes red underline)
   const endSession = async (r: Row) => {
     setEndErr("");
     setEnding(true);
@@ -166,14 +168,12 @@ export default function AdminDashboardClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          session_id: r.id,
-        }),
+        body: JSON.stringify({ session_id: r.id }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setEndErr(data?.error || "Failed to end session");
+        setEndErr((data?.error || "Failed to end session") + ` (HTTP ${res.status})`);
         return false;
       }
       return true;
@@ -182,32 +182,6 @@ export default function AdminDashboardClient() {
       return false;
     } finally {
       setEnding(false);
-    }
-  };
-
-  // ✅ NEW: Delete Entry (ONLY sessions row)
-  const deleteEntry = async (r: Row) => {
-    setDeleteErr("");
-    setDeleting(true);
-    try {
-      const res = await fetch("/api/admin/visitors/delete-entry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ session_id: r.id }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setDeleteErr(data?.error || "Failed to delete entry");
-        return false;
-      }
-      return true;
-    } catch (e: any) {
-      setDeleteErr(e?.message || "Failed to delete entry");
-      return false;
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -224,7 +198,7 @@ export default function AdminDashboardClient() {
 
       {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-      {/* ✅ QR PANEL (unchanged) */}
+      {/* ✅ QR PANEL (shows generated QRs like before) */}
       {qrs.length > 0 && (
         <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="font-semibold mb-3">Active Exit QRs</div>
@@ -253,7 +227,6 @@ export default function AdminDashboardClient() {
         </div>
       )}
 
-      {/* TABLE */}
       <div className="overflow-auto rounded-xl border border-white/10 bg-[#0b0b0b]">
         <table className="w-full text-sm">
           <thead className="bg-white/5 text-white/70">
@@ -267,10 +240,6 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Slot</th>
               <th className="p-3 text-left">Exit Time</th>
               <th className="p-3 text-left">End Session</th>
-
-              {/* ✅ NEW COLUMN */}
-              <th className="p-3 text-left">Entry</th>
-
               <th className="p-3 text-left">QR</th>
             </tr>
           </thead>
@@ -306,19 +275,11 @@ export default function AdminDashboardClient() {
                     )}
                   </td>
 
-                  {/* ✅ NEW: Entry column delete */}
-                  <td className="p-3">
-                    <button
-                      onClick={() => setDeleteTarget(r)}
-                      className="rounded-lg bg-red-600 px-3 py-2 font-semibold hover:bg-red-500"
-                    >
-                      Delete
-                    </button>
-                  </td>
-
                   <td className="p-3">
                     {completed ? (
-                      <span className="text-green-400 font-semibold">Session Completed</span>
+                      <span className="text-green-400 font-semibold">
+                        Session Completed
+                      </span>
                     ) : (
                       <button
                         onClick={() => genQr(r)}
@@ -335,7 +296,7 @@ export default function AdminDashboardClient() {
 
             {rows.length === 0 && (
               <tr>
-                <td className="p-4 text-white/60" colSpan={11}>
+                <td className="p-4 text-white/60" colSpan={10}>
                   No sessions found.
                 </td>
               </tr>
@@ -344,7 +305,6 @@ export default function AdminDashboardClient() {
         </table>
       </div>
 
-      {/* END SESSION MODAL (unchanged) */}
       {endTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
@@ -384,56 +344,6 @@ export default function AdminDashboardClient() {
                 disabled={ending}
               >
                 {ending ? "Ending..." : "Yes"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ✅ NEW: DELETE CONFIRM MODAL */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="text-lg font-semibold">Do you want to delete this entry?</div>
-                <div className="text-sm text-white/60 mt-1">
-                  This will permanently remove ONLY this entry row from the database.
-                </div>
-              </div>
-              <button onClick={() => setDeleteTarget(null)}>✕</button>
-            </div>
-
-            {deleteErr && <div className="mt-3 text-red-300 text-sm">{deleteErr}</div>}
-
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="flex-1 rounded-xl bg-white/10 py-2.5 font-semibold"
-                disabled={deleting}
-              >
-                No
-              </button>
-
-              <button
-                onClick={async () => {
-                  const target = deleteTarget;
-                  if (!target) return;
-
-                  const ok = await deleteEntry(target);
-                  if (!ok) return;
-
-                  setDeleteTarget(null);
-
-                  // ✅ Remove from UI instantly (fast) + refresh (safe)
-                  setRows((prev) => prev.filter((x) => x.id !== target.id));
-                  setQrs((prev) => prev.filter((q) => q.session_id !== target.id));
-                  await load();
-                }}
-                className="flex-1 rounded-xl bg-red-600 py-2.5 font-semibold hover:bg-red-500 disabled:opacity-50"
-                disabled={deleting}
-              >
-                {deleting ? "Deleting..." : "Yes"}
               </button>
             </div>
           </div>
