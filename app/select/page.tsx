@@ -8,7 +8,13 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
+type PlayerHit = {
+  user_id: string;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  employee_id: string | null;
+};
 type Game = {
   id: string;
   name: string;
@@ -25,6 +31,9 @@ type PersonPick = {
 };
 export default function SelectPage() {
   const router = useRouter();
+  
+  const [hits, setHits] = useState<PlayerHit[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<PersonPick[]>([]);
@@ -123,7 +132,44 @@ export default function SelectPage() {
     const id = setInterval(loadGames, 5000);
     return () => clearInterval(id);
   }, []);
+  useEffect(() => {
+    const id = setTimeout(async () => {
+      const term = q.trim();
+      if (term.length < 2) {
+        setHits([]);
+        return;
+      }
 
+      setSearching(true);
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        const jwt = sess?.session?.access_token;
+        if (!jwt) {
+          setHits([]);
+          return;
+        }
+
+        const res = await fetch(`/api/players/search?q=${encodeURIComponent(term)}`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${jwt}` },
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setHits([]);
+          return;
+        }
+
+        const list = Array.isArray(data.users) ? (data.users as PlayerHit[]) : [];
+        // remove already added
+        setHits(list.filter((u) => !selectedIds.includes(u.user_id)));
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(id);
+  }, [q, selectedIds]);
   const bookSlot = async () => {
     setMsg("");
     setSlotFullOpen(false);
@@ -148,8 +194,7 @@ export default function SelectPage() {
         body: JSON.stringify({
           game_id: gameId,
           players,
-          player_user_ids: picked.map((p) => p.user_id), // ✅ NEW
-
+          player_user_ids: selectedIds, // ✅ add this
         }),
       });
 
@@ -257,76 +302,75 @@ export default function SelectPage() {
         </div>
         {/* Add other players */}
         {/* Add other players */}
-        <div className="mt-5">
+        
+                 {/* Add other players */}
+        <div className="mt-4">
           <label className="text-xs text-white/60">Add other players</label>
 
           <input
             className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none"
-            placeholder="Search by name / email / employee id"
+            placeholder="Search by name, email, employee id..."
             value={q}
-            onChange={(e) => searchPeople(e.target.value)}
+            onChange={(e) => setQ(e.target.value)}
             disabled={booking}
           />
 
-          {/* picked chips */}
-          {picked.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {picked.map((p) => (
-                <div
-                  key={p.user_id}
-                  className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm"
+          {/* Selected pills */}
+          {selectedIds.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {selectedIds.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setSelectedIds((prev) => prev.filter((x) => x !== id))}
+                  className="text-xs rounded-full border border-white/10 bg-white/5 px-3 py-1 hover:bg-white/10"
+                  title="Remove"
                 >
-                  <span className="font-semibold">{p.full_name || p.employee_id || p.email}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPicked((prev) => prev.filter((x) => x.user_id !== p.user_id));
-                    }}
-                    className="rounded-full bg-white/10 px-2 py-0.5 hover:bg-white/15"
-                  >
-                    ✕
-                  </button>
-                </div>
+                  Added • {id.slice(0, 6)}… ✕
+                </button>
               ))}
             </div>
           )}
 
-          {/* results list */}
-          {q.trim().length >= 2 && (
-            <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
-              {searching ? (
-                <div className="px-4 py-3 text-sm text-white/60">Searching…</div>
-              ) : results.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-white/60">No matches.</div>
-              ) : (
-                results.map((p) => (
-                  <div
-                    key={p.user_id}
-                    className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/10 last:border-0"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-semibold truncate">{p.full_name || "-"}</div>
-                      <div className="text-xs text-white/50 truncate">
-                        {p.employee_id ? `${p.employee_id} • ` : ""}
-                        {p.email}
-                      </div>
+          {/* Results */}
+          <div className="mt-2 rounded-xl border border-white/10 bg-black/30 overflow-hidden">
+            {searching ? (
+              <div className="px-4 py-3 text-sm text-white/60">Searching...</div>
+            ) : hits.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-white/60">No matches.</div>
+            ) : (
+              hits.map((u) => (
+                <div
+                  key={u.user_id}
+                  className="flex items-center justify-between gap-3 px-4 py-3 border-t border-white/10 first:border-t-0"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold truncate">
+                      {u.full_name || u.employee_id || u.email || "User"}
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPicked((prev) => [...prev, p]);
-                        setResults((prev) => prev.filter((x) => x.user_id !== p.user_id));
-                      }}
-                      className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15"
-                    >
-                      + Add
-                    </button>
+                    <div className="text-xs text-white/60 truncate">
+                      {u.employee_id ? `${u.employee_id} • ` : ""}
+                      {u.email || "-"}
+                    </div>
                   </div>
-                ))
-              )}
-            </div>
-          )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedIds((prev) =>
+                        prev.includes(u.user_id) ? prev : [...prev, u.user_id]
+                      );
+                      setQ("");       // optional: clear search
+                      setHits([]);    // optional: close list
+                    }}
+                    className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/15"
+                  >
+                    + Add
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
         {/* Book button */}
         <button
