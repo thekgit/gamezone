@@ -8,7 +8,7 @@ export const revalidate = 0;
 export async function GET() {
   try {
     if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized", rows: [], debug: { step: "assertAdmin_failed" } }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
@@ -23,26 +23,41 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(9999);
 
-    if (error) return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message, rows: [], debug: { step: "query_failed" } }, { status: 500 });
+    }
 
     const rows = (data || []).map((s: any) => ({
       id: s.id,
       created_at: s.created_at,
+
       full_name: s.visitor_name ?? null,
       phone: s.visitor_phone ?? null,
       email: s.visitor_email ?? null,
+
       game_name: s?.games?.name ?? null,
-      players: s.players ?? null,
+
       slot_start: s.started_at ?? null,
       slot_end: s.ends_at ?? null,
+
       exit_time: s.ended_at ?? null,
       status: s.status ?? null,
-      player_user_ids: Array.isArray(s.player_user_ids) ? s.player_user_ids : [],
+      players: s.players ?? null,
+
+      // keep for later UI expansion
       user_id: s.user_id ?? null,
+      player_user_ids: Array.isArray(s.player_user_ids) ? s.player_user_ids : [],
     }));
 
-    return NextResponse.json({ rows }, { status: 200 });
+    return NextResponse.json(
+      {
+        rows,
+        // ✅ TEMP DEBUG
+        debug: { totalRows: rows.length, note: "Remove debug later once confirmed" },
+      },
+      { status: 200 }
+    );
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
+    return NextResponse.json({ error: e?.message || "Server error", rows: [], debug: { step: "catch" } }, { status: 500 });
   }
 }
