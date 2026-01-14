@@ -269,9 +269,10 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">End Session</th>
 
               {/* ✅ NEW COLUMN */}
-              <th className="p-3 text-left">Entry</th>
+              
 
               <th className="p-3 text-left">QR</th>
+              <th className="p-3 text-left">Entry</th>
             </tr>
           </thead>
 
