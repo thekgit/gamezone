@@ -18,46 +18,48 @@ export async function GET(req: Request) {
     const q = String(url.searchParams.get("q") || "").trim();
 
     if (!q || q.length < 2) {
-      return NextResponse.json({ rows: [] }, { status: 200 });
+      return NextResponse.json({ profiles: [] }, { status: 200 });
     }
 
-    // ✅ Require Bearer token (user must be logged in)
+    // Require Bearer token
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : "";
 
     if (!token) {
-      return NextResponse.json({ error: "Missing auth token", rows: [] }, { status: 401 });
+      return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
     }
 
-    // ✅ Validate token and get current user id
+    // Validate token -> get current user id
     const anon = supabaseAnon();
     const { data: meRes, error: meErr } = await anon.auth.getUser(token);
 
     if (meErr || !meRes?.user?.id) {
-      return NextResponse.json({ error: "Invalid session", rows: [] }, { status: 401 });
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
     const meId = meRes.user.id;
 
     const admin = supabaseAdmin();
 
-    const like = `%${q}%`;
+    // IMPORTANT: escape % and _ so ilike doesn't behave weird
+    const safe = q.replace(/[%_]/g, "\\$&");
 
     const { data, error } = await admin
       .from("profiles")
       .select("user_id, full_name, email, employee_id, phone")
-      .or(`full_name.ilike.${like},email.ilike.${like},employee_id.ilike.${like}`)
+      .or(
+        `full_name.ilike.%${safe}%,email.ilike.%${safe}%,employee_id.ilike.%${safe}%`
+      )
       .order("full_name", { ascending: true })
       .limit(15);
 
     if (error) {
-      return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // ✅ Hide current logged-in user from results
-    const rows = (data || [])
+    const profiles = (data || [])
       .filter((p: any) => String(p.user_id) !== String(meId))
       .map((p: any) => ({
         user_id: p.user_id,
@@ -67,8 +69,11 @@ export async function GET(req: Request) {
         phone: p.phone ?? "",
       }));
 
-    return NextResponse.json({ rows }, { status: 200 });
+    return NextResponse.json({ profiles }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }

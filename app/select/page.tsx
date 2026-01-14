@@ -126,18 +126,17 @@ export default function SelectPage() {
 
         const res = await fetch(`/api/profiles/search?q=${encodeURIComponent(term)}`, {
           cache: "no-store",
-          headers: { Authorization: `Bearer ${jwt}` }, // ✅ REQUIRED by your API
+          headers: { Authorization: `Bearer ${jwt}` },
         });
-
+        
         const data = await res.json().catch(() => ({}));
-
+        
         if (!res.ok) {
-          setResults([]);
           setMsg(data?.error || `Search failed (HTTP ${res.status})`);
+          setResults([]);
           return;
         }
-
-        // ✅ API returns { profiles: [...] } (NOT rows)
+        
         setResults((data.profiles || []) as ProfilePick[]);
       } finally {
         setSearching(false);
