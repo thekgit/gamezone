@@ -19,19 +19,6 @@ function addMinutesIso(iso: string, mins: number) {
   return d.toISOString();
 }
 
-function uniqStrings(arr: any[]) {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const x of arr || []) {
-    const s = String(x || "").trim();
-    if (!s) continue;
-    if (seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
-  }
-  return out;
-}
-
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -41,19 +28,21 @@ export async function POST(req: Request) {
     // legacy (some old client sends game key or name)
     const game_legacy = String(body?.game || "").trim();
 
-    const players_from_client = Number(body?.players ?? 1);
-
-    // ✅ NEW: other players (user_ids)
-    const player_user_ids_from_client = Array.isArray(body?.player_user_ids)
-      ? uniqStrings(body.player_user_ids)
-      : [];
+    const players = Number(body?.players ?? 1);
 
     const auth = req.headers.get("authorization") || "";
     const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!jwt) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
 
     const admin = supabaseAdmin();
-
+    const rawOthers = Array.isArray(body?.player_user_ids) ? body.player_user_ids : [];
+    const player_user_ids = Array.from(
+      new Set(
+        rawOthers
+          .map((x: any) => String(x || "").trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 8); // limit 8 others (optional)
     // ✅ resolve user once
     const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
     if (userErr || !userRes?.user?.id) {
@@ -107,7 +96,7 @@ export async function POST(req: Request) {
     const duration_minutes = Number(gameRow.duration_minutes ?? 60);
     const capacity = Math.max(1, Number(gameRow.court_count ?? 1));
 
-    // ✅ compute started/ends ISO
+    // ✅ compute started/ends ISO (fixes your red lines)
     const started_at_iso = nowIso();
     const ends_at_iso = addMinutesIso(started_at_iso, duration_minutes);
 
@@ -116,9 +105,9 @@ export async function POST(req: Request) {
       .from("sessions")
       .select("id", { count: "exact", head: true })
       .eq("game_id", game_id)
-      .or("status.eq.active,status.is.null")
+      .or("status.eq.active,status.is.null") // treat null as active (optional)
       .is("ended_at", null)
-      .gt("ends_at", started_at_iso);
+      .gt("ends_at", started_at_iso); // still running
 
     if (countErr) return NextResponse.json({ error: countErr.message }, { status: 500 });
 
@@ -130,7 +119,7 @@ export async function POST(req: Request) {
     let full_name: string | null = null;
     let phone: string | null = null;
 
-    // A) profiles (if exists) ✅ FIX: profiles table uses user_id (NOT id)
+    // A) profiles (if exists)
     const { data: prof } = await admin
       .from("profiles")
       .select("full_name, phone")
@@ -161,40 +150,32 @@ export async function POST(req: Request) {
     const entry_token = token(16);
     const exit_token = token(16);
 
-    // ✅ NEW: finalize player list
-    // - ensure no duplicates
-    // - ensure the creator isn't duplicated inside player_user_ids
-    const cleanedOther = player_user_ids_from_client.filter((x) => x !== user_id);
-    const player_user_ids = uniqStrings([user_id, ...cleanedOther]); // include booking user always
-
-    // ✅ OPTIONAL: keep players count in-sync with picked list
-    // If you want players dropdown to still control it, comment this next line.
-    const players = Math.max(players_from_client || 1, player_user_ids.length);
-
     // ✅ insert session
+    const filtered_player_user_ids = player_user_ids.filter(
+      (pid) => pid !== user_id
+    );
+    
+    const minPlayers = 1 + filtered_player_user_ids.length;
+    const finalPlayers = Math.max(players, minPlayers);
+    
     const { data: created, error: insErr } = await admin
       .from("sessions")
       .insert({
         user_id,
         game_id,
-        players,
+        players: finalPlayers,
+        player_user_ids: filtered_player_user_ids,
         status: "active",
-
-        // booking window
+    
         started_at: started_at_iso,
         ends_at: ends_at_iso,
-
-        // visitor fields (fixes "-" in admin)
+    
         visitor_name: full_name || meta.full_name || email || null,
         visitor_phone: phone || meta.phone || null,
         visitor_email: email || null,
-
-        // tokens (exit QR)
+    
         entry_token,
         exit_token,
-
-        // ✅ NEW: save group players in same session row
-        player_user_ids, // <-- requires sessions.player_user_ids (text[])
       })
       .select("id, entry_token, exit_token")
       .single();

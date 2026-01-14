@@ -5,10 +5,6 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function uniqStrings(arr: any[]) {
-  return Array.from(new Set(arr.filter(Boolean).map((x) => String(x).trim()).filter(Boolean)));
-}
-
 export async function GET() {
   try {
     if (!assertAdmin()) {
@@ -17,12 +13,13 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    // ✅ Fetch sessions + game name + player_user_ids
     const { data, error } = await admin
       .from("sessions")
       .select(
         `
         id,
+        user_id,
+        player_user_ids,
         created_at,
         status,
         players,
@@ -32,7 +29,6 @@ export async function GET() {
         visitor_name,
         visitor_phone,
         visitor_email,
-        player_user_ids,
         games:game_id ( name )
       `
       )
@@ -43,83 +39,87 @@ export async function GET() {
       return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
     }
 
-    const sessions = data || [];
+    const sessionRows = (data || []) as any[];
 
-    // ✅ Collect all additional player user_ids from all sessions
-    const allExtraUids = uniqStrings(
-      sessions.flatMap((s: any) => Array.isArray(s.player_user_ids) ? s.player_user_ids : [])
-    );
+// collect all ids we need to resolve into profiles
+const idsToFetch = new Set<string>();
 
-    // ✅ Load profiles for those extra users (no relationship join)
-    const profilesMap = new Map<string, { full_name: string | null; phone: string | null; email: string | null }>();
+for (const s of sessionRows) {
+  if (s.user_id) idsToFetch.add(String(s.user_id));
+  const arr = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+  for (const pid of arr) if (pid) idsToFetch.add(String(pid));
+}
 
-    if (allExtraUids.length > 0) {
-      const { data: profs, error: pErr } = await admin
-        .from("profiles")
-        .select("user_id, full_name, phone, email")
-        .in("user_id", allExtraUids);
+const idList = Array.from(idsToFetch);
 
-      if (pErr) {
-        return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
-      }
+const profilesMap = new Map<string, any>();
+if (idList.length > 0) {
+  const { data: проф, error: pErr } = await admin
+    .from("profiles")
+    .select("user_id, full_name, phone, email, employee_id")
+    .in("user_id", idList);
 
-      for (const p of profs || []) {
-        profilesMap.set(String(p.user_id), {
-          full_name: (p as any).full_name ?? null,
-          phone: (p as any).phone ?? null,
-          email: (p as any).email ?? null,
-        });
-      }
-    }
+  if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
 
-    // ✅ Build rows exactly how your UI expects
-    const rows =
-      sessions.map((s: any) => {
-        const extraIds: string[] = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+  for (const p of проф || []) profilesMap.set(String(p.user_id), p);
+}
 
-        const primaryName = s.visitor_name ?? null;
-        const primaryPhone = s.visitor_phone ?? null;
-        const primaryEmail = s.visitor_email ?? null;
+const rows =
+  sessionRows.map((s: any) => {
+    const mainId = s.user_id ? String(s.user_id) : "";
+    const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-        const extraNames: string[] = [];
-        const extraPhones: string[] = [];
-        const extraEmails: string[] = [];
+    // main display fallback (for visitor sessions that store visitor_name/email/phone)
+    const mainPerson = {
+      user_id: mainId || null,
+      full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
+      phone: s.visitor_phone ?? mainProfile?.phone ?? null,
+      email: s.visitor_email ?? mainProfile?.email ?? null,
+      employee_id: mainProfile?.employee_id ?? null,
+    };
 
-        for (const uid of extraIds) {
-          const p = profilesMap.get(String(uid));
-          if (!p) continue;
+    const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+    const others = otherIds
+      .map((pid: any) => profilesMap.get(String(pid)))
+      .filter(Boolean)
+      .map((p: any) => ({
+        user_id: p.user_id,
+        full_name: p.full_name ?? null,
+        phone: p.phone ?? null,
+        email: p.email ?? null,
+        employee_id: p.employee_id ?? null,
+      }));
 
-          if (p.full_name) extraNames.push(p.full_name);
-          if (p.phone) extraPhones.push(p.phone);
-          if (p.email) extraEmails.push(p.email);
-        }
+    const people = [mainPerson, ...others];
 
-        // ✅ Combine as ONE cell text (same row)
-        const full_name = uniqStrings([primaryName, ...extraNames]).join(", ") || null;
-        const phone = uniqStrings([primaryPhone, ...extraPhones]).join(", ") || null;
-        const email = uniqStrings([primaryEmail, ...extraEmails]).join(", ") || null;
+    return {
+      id: s.id,
+      created_at: s.created_at,
 
-        return {
-          id: s.id,
-          created_at: s.created_at ?? null,
+      // keep compatibility
+      full_name: mainPerson.full_name,
+      phone: mainPerson.phone,
+      email: mainPerson.email,
 
-          full_name,
-          phone,
-          email,
+      // ✅ new (UI will use this)
+      people,
 
-          game_name: s?.games?.name ?? null,
-          players: s.players ?? null,
+      game_name: s?.games?.name ?? null,
 
-          slot_start: s.started_at ?? null,
-          slot_end: s.ends_at ?? null,
+      slot_start: s.started_at ?? null,
+      slot_end: s.ends_at ?? null,
 
-          exit_time: s.ended_at ?? null,
-          status: s.status ?? null,
-        };
-      }) ?? [];
+      exit_time: s.ended_at ?? null,
+      status: s.status ?? null,
+      players: s.players ?? null,
+    };
+  }) ?? [];
 
     return NextResponse.json({ rows }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error", rows: [] },
+      { status: 500 }
+    );
   }
 }

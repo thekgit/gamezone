@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import AparUsersClient from "../../../(panel)/ui/AparUsersClient";
-
 type Person = {
   user_id: string | null;
   full_name: string | null;
@@ -19,9 +18,7 @@ type Row = {
   full_name: string | null;
   phone: string | null;
   email: string | null;
-
   people?: Person[]; // ✅ NEW
-
   game_name: string | null;
   players: number | null;
 

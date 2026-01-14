@@ -5,7 +5,6 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// anon client ONLY to validate JWT
 function supabaseAnon() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,37 +18,31 @@ export async function GET(req: Request) {
     const q = String(url.searchParams.get("q") || "").trim();
 
     if (!q || q.length < 2) {
-      return NextResponse.json({ profiles: [] }, { status: 200 });
+      return NextResponse.json({ users: [] }, { status: 200 });
     }
 
-    // ---- AUTH ----
+    // Identify current user (must be logged in)
     const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ")
+    const token = authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : "";
 
     if (!token) {
-      return NextResponse.json(
-        { error: "Missing auth token", profiles: [] },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
     }
 
     const anon = supabaseAnon();
     const { data: meRes, error: meErr } = await anon.auth.getUser(token);
-
     if (meErr || !meRes?.user?.id) {
-      return NextResponse.json(
-        { error: "Invalid session", profiles: [] },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    const myUserId = meRes.user.id;
+    const meId = meRes.user.id;
 
-    // ---- SEARCH ----
+    // Search profiles (service role so we can search)
     const admin = supabaseAdmin();
 
+    // Use ilike on three fields (OR). Keep result small.
     const { data, error } = await admin
       .from("profiles")
       .select("user_id, full_name, email, employee_id, phone")
@@ -57,31 +50,23 @@ export async function GET(req: Request) {
         `full_name.ilike.%${q}%,email.ilike.%${q}%,employee_id.ilike.%${q}%`
       )
       .order("full_name", { ascending: true })
-      .limit(20);
+      .limit(15);
 
-    if (error) {
-      return NextResponse.json(
-        { error: error.message, profiles: [] },
-        { status: 500 }
-      );
-    }
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // ---- FILTER SELF ----
-    const profiles = (data || [])
-      .filter((p: any) => String(p.user_id) !== String(myUserId))
-      .map((p: any) => ({
-        user_id: p.user_id,
-        full_name: p.full_name ?? "",
-        email: p.email ?? "",
-        employee_id: p.employee_id ?? "",
-        phone: p.phone ?? "",
+    // Don't show self in results
+    const users = (data || [])
+      .filter((u: any) => String(u.user_id) !== String(meId))
+      .map((u: any) => ({
+        user_id: u.user_id,
+        full_name: u.full_name ?? "",
+        email: u.email ?? "",
+        employee_id: u.employee_id ?? "",
+        phone: u.phone ?? "",
       }));
 
-    return NextResponse.json({ profiles }, { status: 200 });
+    return NextResponse.json({ users }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Server error", profiles: [] },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
 }
