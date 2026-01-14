@@ -139,7 +139,7 @@ export default function SelectPage() {
         setHits([]);
         return;
       }
-
+  
       setSearching(true);
       try {
         const { data: sess } = await supabase.auth.getSession();
@@ -148,28 +148,36 @@ export default function SelectPage() {
           setHits([]);
           return;
         }
-
-        const res = await fetch(`/api/players/search?q=${encodeURIComponent(term)}`, {
+  
+        const res = await fetch("/api/players/search", {
+          method: "POST",
           cache: "no-store",
-          headers: { Authorization: `Bearer ${jwt}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${jwt}`,
+          },
+          body: JSON.stringify({ q: term }),
         });
-
+  
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           setHits([]);
           return;
         }
-
-        const list = Array.isArray(data.users) ? (data.users as PlayerHit[]) : [];
+  
+        // ✅ API returns { results: [...] }
+        const list = Array.isArray(data.results) ? (data.results as PlayerHit[]) : [];
+  
         // remove already added
         setHits(list.filter((u) => !selectedIds.includes(u.user_id)));
       } finally {
         setSearching(false);
       }
     }, 250);
-
+  
     return () => clearTimeout(id);
   }, [q, selectedIds]);
+
   const bookSlot = async () => {
     setMsg("");
     setSlotFullOpen(false);

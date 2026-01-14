@@ -1,197 +1,155 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function token(len = 12) {
-  return crypto.randomBytes(len).toString("hex");
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function addMinutesIso(iso: string, mins: number) {
-  const d = new Date(iso);
-  d.setMinutes(d.getMinutes() + mins);
-  return d.toISOString();
-}
-
+/**
+ * POST { q: string }
+ * Requires Authorization: Bearer <jwt>
+ *
+ * Returns:
+ * { ok: true, results: [{ user_id, full_name, email, phone, employee_id }] }
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
+    const q = String(body?.q || "").trim();
 
-    // preferred
-    const game_id_from_client = String(body?.game_id || "").trim();
-    // legacy (some old client sends game key or name)
-    const game_legacy = String(body?.game || "").trim();
-
-    const players = Number(body?.players ?? 1);
+    if (!q || q.length < 2) {
+      return NextResponse.json({ ok: true, results: [] }, { status: 200 });
+    }
 
     const auth = req.headers.get("authorization") || "";
     const jwt = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!jwt) return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+    if (!jwt) {
+      return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+    }
 
     const admin = supabaseAdmin();
-    const rawOthers = Array.isArray(body?.player_user_ids) ? body.player_user_ids : [];
-    const player_user_ids = Array.from(
-      new Set(
-        rawOthers
-          .map((x: any) => String(x || "").trim())
-          .filter(Boolean)
-      )
-    ).slice(0, 8); // limit 8 others (optional)
-    // ✅ resolve user once
-    const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
-    if (userErr || !userRes?.user?.id) {
+
+    // ✅ get current user from jwt (service role can do this)
+    const { data: userRes, error: uErr } = await admin.auth.getUser(jwt);
+    if (uErr || !userRes?.user?.id) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    const user = userRes.user;
-    const user_id = user.id;
-    const email = (user.email || "").toLowerCase();
+    const me = userRes.user;
+    const myUserId = me.id;
 
-    // ✅ resolve game
-    let gameRow: any = null;
+    // try to determine company (from metadata OR profiles)
+    let company = String(me.user_metadata?.company || me.user_metadata?.company_key || "").trim();
 
-    if (game_id_from_client) {
-      const { data: g, error: gErr } = await admin
-        .from("games")
-        .select("id, name, duration_minutes, court_count, is_active")
-        .eq("id", game_id_from_client)
+    if (!company) {
+      const { data: p } = await admin
+        .from("profiles")
+        .select("company")
+        .eq("user_id", myUserId)
         .maybeSingle();
-      if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
-      gameRow = g;
-    } else if (game_legacy) {
-      // try by key (if you have it)
-      const { data: g1 } = await admin
-        .from("games")
-        .select("id, name, duration_minutes, court_count, is_active")
-        // @ts-ignore: if column exists
-        .eq("key", game_legacy)
-        .maybeSingle();
+      if (p?.company) company = String(p.company);
+    }
 
-      if (g1?.id) {
-        gameRow = g1;
-      } else {
-        // try by name
-        const { data: g2, error: g2Err } = await admin
-          .from("games")
-          .select("id, name, duration_minutes, court_count, is_active")
-          .ilike("name", game_legacy)
-          .maybeSingle();
-        if (g2Err) return NextResponse.json({ error: g2Err.message }, { status: 500 });
-        gameRow = g2;
+    const like = `%${q}%`;
+
+    // ✅ 1) Search profiles (best source)
+    // NOTE: your schema uses profiles.user_id (NOT profiles.id)
+    let profilesRows: any[] = [];
+    {
+      const query = admin
+        .from("profiles")
+        .select("user_id, full_name, email, phone, employee_id, company")
+        .neq("user_id", myUserId)
+        .or(`full_name.ilike.${like},email.ilike.${like},employee_id.ilike.${like}`)
+        .limit(15);
+
+      if (company) query.eq("company", company);
+
+      const { data, error } = await query;
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
       }
+      profilesRows = data || [];
     }
 
-    if (!gameRow?.id) return NextResponse.json({ error: "Game not found" }, { status: 400 });
-    if (gameRow.is_active === false) {
-      return NextResponse.json({ error: "Game is not active" }, { status: 400 });
+    // ✅ 2) If profiles has results, return them
+    if (profilesRows.length > 0) {
+      return NextResponse.json(
+        {
+          ok: true,
+          results: profilesRows.map((r) => ({
+            user_id: r.user_id,
+            full_name: r.full_name ?? null,
+            email: r.email ?? null,
+            phone: r.phone ?? null,
+            employee_id: r.employee_id ?? null,
+          })),
+        },
+        { status: 200 }
+      );
     }
 
-    const game_id = gameRow.id;
-    const duration_minutes = Number(gameRow.duration_minutes ?? 60);
-    const capacity = Math.max(1, Number(gameRow.court_count ?? 1));
-
-    // ✅ compute started/ends ISO (fixes your red lines)
-    const started_at_iso = nowIso();
-    const ends_at_iso = addMinutesIso(started_at_iso, duration_minutes);
-
-    // ✅ capacity check: active sessions for this game "now"
-    const { count: activeCount, error: countErr } = await admin
-      .from("sessions")
-      .select("id", { count: "exact", head: true })
-      .eq("game_id", game_id)
-      .or("status.eq.active,status.is.null") // treat null as active (optional)
-      .is("ended_at", null)
-      .gt("ends_at", started_at_iso); // still running
-
-    if (countErr) return NextResponse.json({ error: countErr.message }, { status: 500 });
-
-    if ((activeCount ?? 0) >= capacity) {
-      return NextResponse.json({ error: "SLOT_FULL" }, { status: 409 });
-    }
-
-    // ✅ get visitor fields (so admin shows details)
-    let full_name: string | null = null;
-    let phone: string | null = null;
-
-    // A) profiles (if exists)
-    const { data: prof } = await admin
-      .from("profiles")
-      .select("full_name, phone")
-      .eq("user_id", user_id)
-      .maybeSingle();
-
-    if (prof?.full_name) full_name = prof.full_name;
-    if (prof?.phone) phone = prof.phone;
-
-    // B) company_employees fallback (imported users)
-    if (!full_name || !phone) {
-      const { data: emp } = await admin
+    // ✅ 3) Fallback: search company_employees by company_key + query
+    // Then map email -> auth user_id (if auth exists)
+    let employees: any[] = [];
+    {
+      const query = admin
         .from("company_employees")
-        .select("full_name, phone")
-        .eq("email", email)
-        .maybeSingle();
+        .select("company_key, company, employee_id, full_name, phone, email")
+        .or(`full_name.ilike.${like},email.ilike.${like},employee_id.ilike.${like}`)
+        .limit(15);
 
-      if (!full_name && emp?.full_name) full_name = emp.full_name;
-      if (!phone && emp?.phone) phone = emp.phone;
+      if (company) {
+        // some projects store it in company, some in company_key
+        query.or(`company.eq.${company},company_key.eq.${company}`);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      employees = data || [];
     }
 
-    // C) auth metadata fallback
-    const meta: any = user.user_metadata || {};
-    if (!full_name && meta.full_name) full_name = String(meta.full_name);
-    if (!phone && meta.phone) phone = String(meta.phone);
+    if (!employees.length) {
+      return NextResponse.json({ ok: true, results: [] }, { status: 200 });
+    }
 
-    // ✅ tokens used for entry/exit flow
-    const entry_token = token(16);
-    const exit_token = token(16);
-
-    // ✅ insert session
-    const filtered_player_user_ids = player_user_ids.filter(
-      (pid) => pid !== user_id
+    // Build email list
+    const emails = Array.from(
+      new Set(employees.map((e) => String(e.email || "").toLowerCase()).filter(Boolean))
     );
-    
-    const minPlayers = 1 + filtered_player_user_ids.length;
-    const finalPlayers = Math.max(players, minPlayers);
-    
-    const { data: created, error: insErr } = await admin
-      .from("sessions")
-      .insert({
-        user_id,
-        game_id,
-        players: finalPlayers,
-        player_user_ids: filtered_player_user_ids,
-        status: "active",
-    
-        started_at: started_at_iso,
-        ends_at: ends_at_iso,
-    
-        visitor_name: full_name || meta.full_name || email || null,
-        visitor_phone: phone || meta.phone || null,
-        visitor_email: email || null,
-    
-        entry_token,
-        exit_token,
-      })
-      .select("id, entry_token, exit_token")
-      .single();
 
-    if (insErr) {
-      return NextResponse.json({ error: insErr.message }, { status: 500 });
+    // Find auth users by listing (supabase admin API doesn’t support direct email search reliably)
+    const { data: listRes, error: listErr } = await admin.auth.admin.listUsers({
+      page: 1,
+      perPage: 2000,
+    });
+    if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });
+
+    const emailToUid = new Map<string, string>();
+    for (const u of listRes?.users || []) {
+      const em = (u.email || "").toLowerCase();
+      if (em && u.id) emailToUid.set(em, u.id);
     }
 
-    // ✅ stable response for your UI
-    return NextResponse.json({
-      ok: true,
-      message: "Slot has been created successfully",
-      session_id: created.id,
-      entry_token: created.entry_token,
-      exit_token: created.exit_token,
-    });
+    const results = employees
+      .map((e) => {
+        const em = String(e.email || "").toLowerCase();
+        const uid = emailToUid.get(em);
+        if (!uid) return null; // if no auth user, can’t add as player_user_id
+        if (uid === myUserId) return null; // exclude self
+        return {
+          user_id: uid,
+          full_name: e.full_name ?? null,
+          email: e.email ?? null,
+          phone: e.phone ?? null,
+          employee_id: e.employee_id ?? null,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 15);
+
+    return NextResponse.json({ ok: true, results }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }
