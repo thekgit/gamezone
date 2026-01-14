@@ -12,7 +12,7 @@ export async function GET(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // ✅ Validate session + get user id
+    // ✅ resolve user from JWT (service role can do this)
     const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
     if (userErr || !userRes?.user?.id) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
@@ -21,30 +21,18 @@ export async function GET(req: Request) {
     const user_id = userRes.user.id;
     const nowIso = new Date().toISOString();
 
-    // ✅ IMPORTANT:
-    // show sessions where:
-    // - user is the owner (user_id)
-    // OR user is included in player_user_ids array
-    // AND still active (ended_at null) AND not expired
+    // ✅ Active = ended_at is NULL AND ends_at is NULL or in future
+    // ✅ Show sessions where:
+    //    - I am owner (user_id)
+    //    - OR I am in player_user_ids
     const { data, error } = await admin
       .from("sessions")
-      .select(
-        `
-        id,
-        players,
-        started_at,
-        ends_at,
-        status,
-        ended_at,
-        user_id,
-        player_user_ids,
-        games:game_id ( name )
-      `
-      )
+      .select(`id, players, status, started_at, ends_at, ended_at, games:game_id(name)`)
+      .or(`user_id.eq.${user_id},player_user_ids.cs.{${user_id}}`)
       .is("ended_at", null)
       .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
-      .or(`user_id.eq.${user_id},player_user_ids.cs.{${user_id}}`)
-      .order("started_at", { ascending: false });
+      .order("started_at", { ascending: false })
+      .limit(100);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
