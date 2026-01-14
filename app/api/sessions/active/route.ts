@@ -20,19 +20,26 @@ export async function GET(req: Request) {
     const user_id = userRes.user.id;
     const nowIso = new Date().toISOString();
 
+    // ✅ Active sessions where:
+    // - I am the owner (user_id)
+    // OR
+    // - I am included in player_user_ids (json/array column)
+    // AND not ended yet
     const { data, error } = await admin
       .from("sessions")
       .select(
         `
         id,
         players,
-        status,
         started_at,
         ends_at,
+        ended_at,
+        status,
         games:game_id ( name )
       `
       )
-      .eq("user_id", user_id)
+      .or(`user_id.eq.${user_id},player_user_ids.cs.{${user_id}}`)
+      .is("ended_at", null)
       .eq("status", "active")
       .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
       .order("started_at", { ascending: false });
@@ -48,7 +55,7 @@ export async function GET(req: Request) {
       status: s.status ?? null,
     }));
 
-    return NextResponse.json({ sessions });
+    return NextResponse.json({ sessions }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

@@ -13,14 +13,15 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
+    // ✅ IMPORTANT: include user_id + player_user_ids
     const { data, error } = await admin
       .from("sessions")
       .select(
         `
         id,
+        created_at,
         user_id,
         player_user_ids,
-        created_at,
         status,
         players,
         started_at,
@@ -41,85 +42,77 @@ export async function GET() {
 
     const sessionRows = (data || []) as any[];
 
-// collect all ids we need to resolve into profiles
-const idsToFetch = new Set<string>();
+    // ✅ collect all ids to resolve
+    const idsToFetch = new Set<string>();
+    for (const s of sessionRows) {
+      if (s.user_id) idsToFetch.add(String(s.user_id));
+      const arr = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+      for (const pid of arr) if (pid) idsToFetch.add(String(pid));
+    }
 
-for (const s of sessionRows) {
-  if (s.user_id) idsToFetch.add(String(s.user_id));
-  const arr = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
-  for (const pid of arr) if (pid) idsToFetch.add(String(pid));
-}
+    const idList = Array.from(idsToFetch);
 
-const idList = Array.from(idsToFetch);
+    const profilesMap = new Map<string, any>();
+    if (idList.length > 0) {
+      const { data: profRows, error: pErr } = await admin
+        .from("profiles")
+        .select("user_id, full_name, phone, email, employee_id")
+        .in("user_id", idList);
 
-const profilesMap = new Map<string, any>();
-if (idList.length > 0) {
-  const { data: проф, error: pErr } = await admin
-    .from("profiles")
-    .select("user_id, full_name, phone, email, employee_id")
-    .in("user_id", idList);
+      if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
 
-  if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 });
+      for (const p of profRows || []) profilesMap.set(String(p.user_id), p);
+    }
 
-  for (const p of проф || []) profilesMap.set(String(p.user_id), p);
-}
+    const rows = sessionRows.map((s: any) => {
+      const mainId = s.user_id ? String(s.user_id) : "";
+      const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-const rows =
-  sessionRows.map((s: any) => {
-    const mainId = s.user_id ? String(s.user_id) : "";
-    const mainProfile = mainId ? profilesMap.get(mainId) : null;
+      const mainPerson = {
+        user_id: mainId || null,
+        full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
+        phone: s.visitor_phone ?? mainProfile?.phone ?? null,
+        email: s.visitor_email ?? mainProfile?.email ?? null,
+        employee_id: mainProfile?.employee_id ?? null,
+      };
 
-    // main display fallback (for visitor sessions that store visitor_name/email/phone)
-    const mainPerson = {
-      user_id: mainId || null,
-      full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
-      phone: s.visitor_phone ?? mainProfile?.phone ?? null,
-      email: s.visitor_email ?? mainProfile?.email ?? null,
-      employee_id: mainProfile?.employee_id ?? null,
-    };
+      const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+      const others = otherIds
+        .map((pid: any) => profilesMap.get(String(pid)))
+        .filter(Boolean)
+        .map((p: any) => ({
+          user_id: String(p.user_id),
+          full_name: p.full_name ?? null,
+          phone: p.phone ?? null,
+          email: p.email ?? null,
+          employee_id: p.employee_id ?? null,
+        }));
 
-    const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
-    const others = otherIds
-      .map((pid: any) => profilesMap.get(String(pid)))
-      .filter(Boolean)
-      .map((p: any) => ({
-        user_id: p.user_id,
-        full_name: p.full_name ?? null,
-        phone: p.phone ?? null,
-        email: p.email ?? null,
-        employee_id: p.employee_id ?? null,
-      }));
+      const people = [mainPerson, ...others];
 
-    const people = [mainPerson, ...others];
+      return {
+        id: s.id,
+        created_at: s.created_at,
 
-    return {
-      id: s.id,
-      created_at: s.created_at,
+        // keep backward compatibility (AdminDashboardClient might still use these)
+        full_name: mainPerson.full_name,
+        phone: mainPerson.phone,
+        email: mainPerson.email,
 
-      // keep compatibility
-      full_name: mainPerson.full_name,
-      phone: mainPerson.phone,
-      email: mainPerson.email,
+        // new multi-player list
+        people,
 
-      // ✅ new (UI will use this)
-      people,
-
-      game_name: s?.games?.name ?? null,
-
-      slot_start: s.started_at ?? null,
-      slot_end: s.ends_at ?? null,
-
-      exit_time: s.ended_at ?? null,
-      status: s.status ?? null,
-      players: s.players ?? null,
-    };
-  }) ?? [];
+        game_name: s?.games?.name ?? null,
+        slot_start: s.started_at ?? null,
+        slot_end: s.ends_at ?? null,
+        exit_time: s.ended_at ?? null,
+        status: s.status ?? null,
+        players: s.players ?? null,
+      };
+    });
 
     return NextResponse.json({ rows }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "Server error", rows: [] },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
   }
 }
