@@ -4,6 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import AparUsersClient from "../../../(panel)/ui/AparUsersClient";
 
+type Person = {
+  user_id: string | null;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  employee_id?: string | null;
+};
+
 type Row = {
   id: string;
   created_at: string;
@@ -11,6 +19,8 @@ type Row = {
   full_name: string | null;
   phone: string | null;
   email: string | null;
+
+  people?: Person[]; // ✅ NEW
 
   game_name: string | null;
   players: number | null;
@@ -284,9 +294,51 @@ export default function AdminDashboardClient() {
               return (
                 <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                   <td className="p-3">{dt(r.created_at)}</td>
-                  <td className="p-3">{r.full_name || "-"}</td>
-                  <td className="p-3">{r.phone || "-"}</td>
-                  <td className="p-3">{r.email || "-"}</td>
+                  //
+                  <td className="p-3">
+                    {Array.isArray(r.people) && r.people.length > 0 ? (
+                      <div className="space-y-1">
+                        {r.people.map((p, i) => (
+                          <div key={(p.user_id || "x") + i} className="text-sm">
+                            <div className="font-semibold">{p.full_name || "-"}</div>
+                            {p.employee_id ? (
+                              <div className="text-xs text-white/50">{p.employee_id}</div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      r.full_name || "-"
+                    )}
+                  </td>
+
+                  <td className="p-3">
+                    {Array.isArray(r.people) && r.people.length > 0 ? (
+                      <div className="space-y-1">
+                        {r.people.map((p, i) => (
+                          <div key={(p.user_id || "x") + "ph" + i} className="text-sm">
+                            {p.phone || "-"}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      r.phone || "-"
+                    )}
+                  </td>
+
+                  <td className="p-3">
+                    {Array.isArray(r.people) && r.people.length > 0 ? (
+                      <div className="space-y-1">
+                        {r.people.map((p, i) => (
+                          <div key={(p.user_id || "x") + "em" + i} className="text-sm">
+                            {p.email || "-"}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      r.email || "-"
+                    )}
+                  </td>
                   <td className="p-3">{r.game_name || "-"}</td>
                   <td className="p-3">{r.players ?? "-"}</td>
                   <td className="p-3">
