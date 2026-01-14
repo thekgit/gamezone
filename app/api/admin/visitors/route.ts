@@ -8,56 +8,126 @@ export const revalidate = 0;
 export async function GET() {
   try {
     if (!assertAdmin()) {
-      return NextResponse.json({ error: "Unauthorized", rows: [], debug: { step: "assertAdmin_failed" } }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
 
+    // ✅ include user_id + player_user_ids so we can resolve people
     const { data, error } = await admin
       .from("sessions")
       .select(
-        `id, created_at, user_id, players, status, started_at, ends_at, ended_at,
-         visitor_name, visitor_phone, visitor_email, player_user_ids,
-         games:game_id(name)`
+        `
+        id,
+        user_id,
+        player_user_ids,
+        created_at,
+        status,
+        players,
+        started_at,
+        ends_at,
+        ended_at,
+        visitor_name,
+        visitor_phone,
+        visitor_email,
+        games:game_id ( name )
+      `
       )
       .order("created_at", { ascending: false })
       .limit(9999);
 
     if (error) {
-      return NextResponse.json({ error: error.message, rows: [], debug: { step: "query_failed" } }, { status: 500 });
+      return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
     }
 
-    const rows = (data || []).map((s: any) => ({
-      id: s.id,
-      created_at: s.created_at,
+    const sessionRows = (data || []) as any[];
 
-      full_name: s.visitor_name ?? null,
-      phone: s.visitor_phone ?? null,
-      email: s.visitor_email ?? null,
+    // ✅ collect all user_ids to resolve from profiles
+    const idsToFetch = new Set<string>();
 
-      game_name: s?.games?.name ?? null,
+    for (const s of sessionRows) {
+      if (s.user_id) idsToFetch.add(String(s.user_id));
+      const arr = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+      for (const pid of arr) if (pid) idsToFetch.add(String(pid));
+    }
 
-      slot_start: s.started_at ?? null,
-      slot_end: s.ends_at ?? null,
+    const idList = Array.from(idsToFetch);
 
-      exit_time: s.ended_at ?? null,
-      status: s.status ?? null,
-      players: s.players ?? null,
+    const profilesMap = new Map<string, any>();
+    if (idList.length > 0) {
+      const { data: profRows, error: pErr } = await admin
+        .from("profiles")
+        .select("user_id, full_name, phone, email, employee_id")
+        .in("user_id", idList);
 
-      // keep for later UI expansion
-      user_id: s.user_id ?? null,
-      player_user_ids: Array.isArray(s.player_user_ids) ? s.player_user_ids : [],
-    }));
+      if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
 
-    return NextResponse.json(
-      {
-        rows,
-        // ✅ TEMP DEBUG
-        debug: { totalRows: rows.length, note: "Remove debug later once confirmed" },
-      },
-      { status: 200 }
-    );
+      for (const p of profRows || []) {
+        profilesMap.set(String(p.user_id), p);
+      }
+    }
+
+    const rows =
+      sessionRows.map((s: any) => {
+        const mainId = s.user_id ? String(s.user_id) : "";
+        const mainProfile = mainId ? profilesMap.get(mainId) : null;
+
+        // ✅ main visitor (fallback order = visitor_* -> profile -> null)
+        const mainPerson = {
+          user_id: mainId || null,
+          full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
+          phone: s.visitor_phone ?? mainProfile?.phone ?? null,
+          email: s.visitor_email ?? mainProfile?.email ?? null,
+          employee_id: mainProfile?.employee_id ?? null,
+        };
+
+        // ✅ other players (from player_user_ids -> profiles)
+        const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+        const others = otherIds
+          .map((pid: any) => profilesMap.get(String(pid)))
+          .filter(Boolean)
+          .map((p: any) => ({
+            user_id: String(p.user_id),
+            full_name: p.full_name ?? null,
+            phone: p.phone ?? null,
+            email: p.email ?? null,
+            employee_id: p.employee_id ?? null,
+          }));
+
+        // ✅ avoid accidental duplicates (if someone added themselves)
+        const seen = new Set<string>();
+        const people = [mainPerson, ...others].filter((p: any) => {
+          const id = String(p.user_id || "");
+          if (!id) return true;
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        });
+
+        return {
+          id: s.id,
+          created_at: s.created_at,
+
+          // keep legacy fields so your current table doesn't break
+          full_name: mainPerson.full_name,
+          phone: mainPerson.phone,
+          email: mainPerson.email,
+
+          // ✅ NEW: all people in this booking
+          people,
+
+          game_name: s?.games?.name ?? null,
+          slot_start: s.started_at ?? null,
+          slot_end: s.ends_at ?? null,
+
+          exit_time: s.ended_at ?? null,
+          status: s.status ?? null,
+          players: s.players ?? null,
+        };
+      }) ?? [];
+
+    return NextResponse.json({ rows }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error", rows: [], debug: { step: "catch" } }, { status: 500 });
+    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
   }
 }

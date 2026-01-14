@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import AparUsersClient from "../../../(panel)/ui/AparUsersClient";
-type Person = {
+type RowPerson = {
   user_id: string | null;
   full_name: string | null;
   phone: string | null;
   email: string | null;
-  employee_id?: string | null;
+  employee_id: string | null;
 };
 
 type Row = {
@@ -18,7 +18,9 @@ type Row = {
   full_name: string | null;
   phone: string | null;
   email: string | null;
-  people?: Person[]; // ✅ NEW
+
+  people?: RowPerson[]; // ✅ NEW
+
   game_name: string | null;
   players: number | null;
 
@@ -28,6 +30,7 @@ type Row = {
   status: string | null;
   exit_time: string | null;
 };
+
 
 type QrItem = {
   session_id: string;
@@ -291,15 +294,17 @@ export default function AdminDashboardClient() {
               return (
                 <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                   <td className="p-3">{dt(r.created_at)}</td>
+                  
+
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
-                      <div className="space-y-1">
-                        {r.people.map((p, i) => (
-                          <div key={(p.user_id || "x") + i} className="text-sm">
-                            <div className="font-semibold">{p.full_name || "-"}</div>
-                            {p.employee_id ? (
-                              <div className="text-xs text-white/50">{p.employee_id}</div>
-                            ) : null}
+                      <div className="space-y-2">
+                        {r.people.map((p, idx) => (
+                          <div key={(p.user_id || "") + "_" + idx} className="leading-snug">
+                            <div className="font-semibold">
+                              {p.full_name || "-"}
+                              {p.employee_id ? <span className="text-white/50 font-normal"> • {p.employee_id}</span> : null}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -310,9 +315,9 @@ export default function AdminDashboardClient() {
 
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
-                      <div className="space-y-1">
-                        {r.people.map((p, i) => (
-                          <div key={(p.user_id || "x") + "ph" + i} className="text-sm">
+                      <div className="space-y-2">
+                        {r.people.map((p, idx) => (
+                          <div key={(p.user_id || "") + "_ph_" + idx} className="text-white/80">
                             {p.phone || "-"}
                           </div>
                         ))}
@@ -324,9 +329,9 @@ export default function AdminDashboardClient() {
 
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
-                      <div className="space-y-1">
-                        {r.people.map((p, i) => (
-                          <div key={(p.user_id || "x") + "em" + i} className="text-sm">
+                      <div className="space-y-2">
+                        {r.people.map((p, idx) => (
+                          <div key={(p.user_id || "") + "_em_" + idx} className="text-white/80 break-all">
                             {p.email || "-"}
                           </div>
                         ))}
@@ -335,6 +340,8 @@ export default function AdminDashboardClient() {
                       r.email || "-"
                     )}
                   </td>
+
+                  
                   <td className="p-3">{r.game_name || "-"}</td>
                   <td className="p-3">{r.players ?? "-"}</td>
                   <td className="p-3">
