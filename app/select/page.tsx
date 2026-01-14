@@ -292,24 +292,7 @@ export default function SelectPage() {
         </div>
 
         {/* Players dropdown */}
-        <div className="mt-4">
-          <label className="text-xs text-white/60">Number of Players</label>
-          <select
-            className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none text-center"
-            value={players}
-            onChange={(e) => setPlayers(Number(e.target.value))}
-            disabled={booking}
-          >
-            {Array.from({ length: 10 }).map((_, i) => {
-              const n = i + 1;
-              return (
-                <option key={n} value={n}>
-                  {n} Player{n > 1 ? "s" : ""}
-                </option>
-              );
-            })}
-          </select>
-        </div>
+        
         {/* Add other players */}
         {/* Add other players */}
         
