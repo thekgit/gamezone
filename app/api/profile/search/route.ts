@@ -17,46 +17,45 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const q = String(url.searchParams.get("q") || "").trim();
 
-    if (q.length < 2) {
+    if (!q || q.length < 2) {
       return NextResponse.json({ profiles: [] }, { status: 200 });
     }
 
-    // ✅ Require Bearer token
+    // Require Bearer token
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.toLowerCase().startsWith("bearer ")
       ? authHeader.slice(7).trim()
       : "";
 
     if (!token) {
-      return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
+      return NextResponse.json({ error: "Missing auth token", profiles: [] }, { status: 401 });
     }
 
-    // ✅ Validate token
+    // Validate token -> get current user id
     const anon = supabaseAnon();
     const { data: meRes, error: meErr } = await anon.auth.getUser(token);
 
     if (meErr || !meRes?.user?.id) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+      return NextResponse.json({ error: "Invalid session", profiles: [] }, { status: 401 });
     }
 
     const meId = meRes.user.id;
 
+    // Search profiles (admin client)
     const admin = supabaseAdmin();
-
-    // escape % and _ so ilike does not behave weird
-    const safe = q.replace(/[%_]/g, "\\$&");
 
     const { data, error } = await admin
       .from("profiles")
       .select("user_id, full_name, email, employee_id, phone")
-      .or(`full_name.ilike.%${safe}%,email.ilike.%${safe}%,employee_id.ilike.%${safe}%`)
+      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,employee_id.ilike.%${q}%`)
       .order("full_name", { ascending: true })
       .limit(15);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: error.message, profiles: [] }, { status: 500 });
     }
 
+    // Hide current user from results
     const profiles = (data || [])
       .filter((p: any) => String(p.user_id) !== String(meId))
       .map((p: any) => ({
@@ -69,6 +68,9 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ profiles }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error", profiles: [] },
+      { status: 500 }
+    );
   }
 }
