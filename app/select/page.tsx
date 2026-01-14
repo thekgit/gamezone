@@ -38,25 +38,25 @@ export default function SelectPage() {
 
   const [slotFullOpen, setSlotFullOpen] = useState(false);
 
+  // ✅ Add other players state
+  const [q, setQ] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<ProfilePick[]>([]);
+  const [picked, setPicked] = useState<ProfilePick[]>([]);
+
+  // ✅ track if user manually changed game (so auto-refresh won’t override)
+  const userPickedGameRef = useRef(false);
+
   // ✅ track latest selected gameId (prevents stale closure issue)
   const gameIdRef = useRef<string>("");
   useEffect(() => {
     gameIdRef.current = gameId;
   }, [gameId]);
 
-  // ✅ track if user manually changed game (so auto-refresh won’t override)
-  const userPickedGameRef = useRef(false);
-
   const selectedGame = useMemo(
     () => games.find((g) => g.id === gameId) || null,
     [games, gameId]
   );
-
-  // ✅ Add other players state
-  const [q, setQ] = useState("");
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<ProfilePick[]>([]);
-  const [picked, setPicked] = useState<ProfilePick[]>([]);
 
   const loadGames = async () => {
     setMsg("");
@@ -83,7 +83,11 @@ export default function SelectPage() {
       }
 
       // ✅ If selected game got removed/inactive, fallback to first game
-      if (currentSelected && active.length > 0 && !active.some((g) => g.id === currentSelected)) {
+      if (
+        currentSelected &&
+        active.length > 0 &&
+        !active.some((g) => g.id === currentSelected)
+      ) {
         userPickedGameRef.current = false; // allow auto-pick again
         setGameId(active[0].id);
       }
@@ -96,34 +100,51 @@ export default function SelectPage() {
     loadGames();
     const id = setInterval(loadGames, 5000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Search profiles (debounced)
+  // ✅ Search profiles (ONLY ONE useEffect)
   useEffect(() => {
     const term = q.trim();
     if (term.length < 2) {
       setResults([]);
+      setSearching(false);
       return;
     }
 
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       setSearching(true);
+      setMsg("");
       try {
-        const res = await fetch(`/api/profiles/search?q=${encodeURIComponent(term)}`, {
-          cache: "no-store",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
+        const { data: sess } = await supabase.auth.getSession();
+        const jwt = sess?.session?.access_token;
+
+        if (!jwt) {
           setResults([]);
           return;
         }
-        setResults((data.rows || []) as ProfilePick[]);
+
+        const res = await fetch(`/api/profiles/search?q=${encodeURIComponent(term)}`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${jwt}` }, // ✅ REQUIRED by your API
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          setResults([]);
+          setMsg(data?.error || `Search failed (HTTP ${res.status})`);
+          return;
+        }
+
+        // ✅ API returns { profiles: [...] } (NOT rows)
+        setResults((data.profiles || []) as ProfilePick[]);
       } finally {
         setSearching(false);
       }
     }, 350);
 
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [q]);
 
   const addPick = (p: ProfilePick) => {
@@ -146,7 +167,7 @@ export default function SelectPage() {
       return;
     }
 
-    if (booking) return; // ✅ prevent double calls
+    if (booking) return;
 
     setBooking(true);
     try {
@@ -228,7 +249,7 @@ export default function SelectPage() {
             className="mt-2 w-full rounded-xl bg-black/40 border border-white/10 px-4 py-3 outline-none text-center"
             value={gameId}
             onChange={(e) => {
-              userPickedGameRef.current = true; // ✅ lock user choice
+              userPickedGameRef.current = true;
               setGameId(e.target.value);
             }}
             disabled={loadingGames || booking}

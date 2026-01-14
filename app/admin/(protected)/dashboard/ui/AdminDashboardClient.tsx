@@ -294,7 +294,6 @@ export default function AdminDashboardClient() {
               return (
                 <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                   <td className="p-3">{dt(r.created_at)}</td>
-                  //
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
                       <div className="space-y-1">
