@@ -134,12 +134,13 @@ export default function SelectPage() {
   }, []);
   useEffect(() => {
     const id = setTimeout(async () => {
+      //
       const term = q.trim();
       if (term.length < 2) {
         setHits([]);
         return;
       }
-  
+
       setSearching(true);
       try {
         const { data: sess } = await supabase.auth.getSession();
@@ -148,31 +149,30 @@ export default function SelectPage() {
           setHits([]);
           return;
         }
-  
-        const res = await fetch("/api/players", {
-          method: "POST",
-          cache: "no-store",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${jwt}`,
-          },
-          body: JSON.stringify({ q: term }),
-        });
-  
+
+        const res = await fetch(
+          `/api/players?q=${encodeURIComponent(term)}`,
+          {
+            cache: "no-store",
+            headers: {
+              Authorization: `Bearer ${jwt}`,
+            },
+          }
+        );
+
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           setHits([]);
           return;
         }
-  
-        // ✅ API returns { results: [...] }
-        const list = Array.isArray(data.results) ? (data.results as PlayerHit[]) : [];
-  
-        // remove already added
+
+        const list: PlayerHit[] = Array.isArray(data.users) ? data.users : [];
+        // remove already selected users
         setHits(list.filter((u) => !selectedIds.includes(u.user_id)));
       } finally {
         setSearching(false);
       }
+      //
     }, 250);
   
     return () => clearTimeout(id);
