@@ -13,20 +13,20 @@ export async function GET() {
 
     const admin = supabaseAdmin();
 
-    // ✅ IMPORTANT: include user_id + player_user_ids
+    // ✅ MUST include user_id + player_user_ids now
     const { data, error } = await admin
       .from("sessions")
       .select(
         `
         id,
         created_at,
-        user_id,
-        player_user_ids,
         status,
         players,
         started_at,
         ends_at,
         ended_at,
+        user_id,
+        player_user_ids,
         visitor_name,
         visitor_phone,
         visitor_email,
@@ -42,7 +42,7 @@ export async function GET() {
 
     const sessionRows = (data || []) as any[];
 
-    // ✅ collect all ids to resolve
+    // ✅ collect all profile ids we need (owner + extra players)
     const idsToFetch = new Set<string>();
     for (const s of sessionRows) {
       if (s.user_id) idsToFetch.add(String(s.user_id));
@@ -54,14 +54,14 @@ export async function GET() {
 
     const profilesMap = new Map<string, any>();
     if (idList.length > 0) {
-      const { data: profRows, error: pErr } = await admin
+      const { data: prof, error: pErr } = await admin
         .from("profiles")
         .select("user_id, full_name, phone, email, employee_id")
         .in("user_id", idList);
 
       if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
 
-      for (const p of profRows || []) profilesMap.set(String(p.user_id), p);
+      for (const p of prof || []) profilesMap.set(String(p.user_id), p);
     }
 
     const rows = sessionRows.map((s: any) => {
@@ -81,7 +81,7 @@ export async function GET() {
         .map((pid: any) => profilesMap.get(String(pid)))
         .filter(Boolean)
         .map((p: any) => ({
-          user_id: String(p.user_id),
+          user_id: p.user_id,
           full_name: p.full_name ?? null,
           phone: p.phone ?? null,
           email: p.email ?? null,
@@ -94,17 +94,19 @@ export async function GET() {
         id: s.id,
         created_at: s.created_at,
 
-        // keep backward compatibility (AdminDashboardClient might still use these)
+        // ✅ keep old fields so your current UI does not break
         full_name: mainPerson.full_name,
         phone: mainPerson.phone,
         email: mainPerson.email,
 
-        // new multi-player list
+        // ✅ new - for multi-player UI rendering later
         people,
 
         game_name: s?.games?.name ?? null,
+
         slot_start: s.started_at ?? null,
         slot_end: s.ends_at ?? null,
+
         exit_time: s.ended_at ?? null,
         status: s.status ?? null,
         players: s.players ?? null,
@@ -113,6 +115,9 @@ export async function GET() {
 
     return NextResponse.json({ rows }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error", rows: [] }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error", rows: [] },
+      { status: 500 }
+    );
   }
 }

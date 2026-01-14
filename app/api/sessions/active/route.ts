@@ -12,6 +12,7 @@ export async function GET(req: Request) {
 
     const admin = supabaseAdmin();
 
+    // ✅ Validate session + get user id
     const { data: userRes, error: userErr } = await admin.auth.getUser(jwt);
     if (userErr || !userRes?.user?.id) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
@@ -20,11 +21,11 @@ export async function GET(req: Request) {
     const user_id = userRes.user.id;
     const nowIso = new Date().toISOString();
 
-    // ✅ Active sessions where:
-    // - I am the owner (user_id)
-    // OR
-    // - I am included in player_user_ids (json/array column)
-    // AND not ended yet
+    // ✅ IMPORTANT:
+    // show sessions where:
+    // - user is the owner (user_id)
+    // OR user is included in player_user_ids array
+    // AND still active (ended_at null) AND not expired
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -33,15 +34,16 @@ export async function GET(req: Request) {
         players,
         started_at,
         ends_at,
-        ended_at,
         status,
+        ended_at,
+        user_id,
+        player_user_ids,
         games:game_id ( name )
       `
       )
-      .or(`user_id.eq.${user_id},player_user_ids.cs.{${user_id}}`)
       .is("ended_at", null)
-      .eq("status", "active")
       .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
+      .or(`user_id.eq.${user_id},player_user_ids.cs.{${user_id}}`)
       .order("started_at", { ascending: false });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
