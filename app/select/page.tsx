@@ -149,7 +149,7 @@ export default function SelectPage() {
           return;
         }
   
-        const res = await fetch("/api/players/search", {
+        const res = await fetch("/api/players", {
           method: "POST",
           cache: "no-store",
           headers: {
