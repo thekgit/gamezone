@@ -340,13 +340,10 @@ export default function SelectPage() {
 
         {/* ✅ AUTO PLAYERS (read-only) */}
         <div className="mt-4 rounded-xl border border-white/10 bg-black/30 px-4 py-3">
-          <div className="text-xs text-white/60">Players (Auto)</div>
           <div className="text-lg font-bold mt-1">
             {computedPlayers} Player{computedPlayers > 1 ? "s" : ""}
           </div>
-          <div className="text-xs text-white/50 mt-1">
-            1 (You) + {selectedIds.length} added
-          </div>
+          
         </div>
 
         {/* Add other players */}
