@@ -21,7 +21,7 @@ type Person = {
   employee_id: string | null;
 };
 
-function s(v: any) {
+function safeStr(v: any) {
   const t = String(v ?? "").trim();
   return t.length ? t : null;
 }
@@ -54,7 +54,6 @@ export async function GET() {
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // ✅ Must include user_id + player_user_ids
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -84,7 +83,7 @@ export async function GET() {
 
     const sessionRows = (data || []) as any[];
 
-    // ✅ collect ids to resolve from profiles
+    // collect ids to resolve from profiles
     const ids = new Set<string>();
     for (const row of sessionRows) {
       if (row.user_id) ids.add(String(row.user_id));
@@ -116,26 +115,24 @@ export async function GET() {
       }
     }
 
-    // ✅ build rows with people[] (same structure as admin)
-    const rows = sessionRows.map((s: any) => {
-      const mainId = s.user_id ? String(s.user_id) : "";
+    const rows = sessionRows.map((sessRow: any) => {
+      const mainId = sessRow.user_id ? String(sessRow.user_id) : "";
       const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-      // main person fallback order:
-      // if visitor_name is "Guest", prefer profile name
-      const mainFullName = isGuestLike(s.visitor_name)
-        ? (mainProfile?.full_name ?? s(s.visitor_name))
-        : (s(s.visitor_name) ?? mainProfile?.full_name);
+      // main person (prefer profile name when visitor_name looks like Guest)
+      const mainFullName = isGuestLike(sessRow.visitor_name)
+        ? (mainProfile?.full_name ?? safeStr(sessRow.visitor_name))
+        : (safeStr(sessRow.visitor_name) ?? mainProfile?.full_name);
 
       const mainPerson: Person = {
         user_id: mainId || null,
         full_name: mainFullName ?? null,
-        phone: s(s.visitor_phone) ?? mainProfile?.phone ?? null,
-        email: s(s.visitor_email) ?? mainProfile?.email ?? null,
+        phone: safeStr(sessRow.visitor_phone) ?? mainProfile?.phone ?? null,
+        email: safeStr(sessRow.visitor_email) ?? mainProfile?.email ?? null,
         employee_id: mainProfile?.employee_id ?? null,
       };
 
-      const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
+      const otherIds = Array.isArray(sessRow.player_user_ids) ? sessRow.player_user_ids : [];
       const others: Person[] = otherIds
         .map((pid: any) => {
           const uid = String(pid || "").trim();
@@ -155,19 +152,19 @@ export async function GET() {
       const people = uniqPeople([mainPerson, ...others]);
 
       return {
-        id: s.id,
-        created_at: s.created_at,
-        game_name: s?.games?.name ?? null,
-        players: s.players ?? null,
-        slot_start: s.started_at ?? null,
-        slot_end: s.ends_at ?? null,
-        status: s.status ?? null,
-        exit_time: s.ended_at ?? null,
+        id: sessRow.id,
+        created_at: sessRow.created_at,
+        game_name: sessRow?.games?.name ?? null,
+        players: sessRow.players ?? null,
+        slot_start: sessRow.started_at ?? null,
+        slot_end: sessRow.ends_at ?? null,
+        status: sessRow.status ?? null,
+        exit_time: sessRow.ended_at ?? null,
 
-        // ✅ key part
+        // ✅ key output
         people,
 
-        // ✅ backward compat
+        // backward compat
         full_name: people[0]?.full_name ?? null,
         phone: people[0]?.phone ?? null,
         email: people[0]?.email ?? null,
