@@ -8,11 +8,7 @@ export const revalidate = 0;
 
 function base64url(input: Buffer | string) {
   const b = Buffer.isBuffer(input) ? input : Buffer.from(input);
-  return b
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
+  return b.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 function signToken(payload: any, secret: string) {
@@ -45,7 +41,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // block QR for already-ended sessions
+    // block QR for ended
     const admin = supabaseAdmin();
     const { data: s, error: sErr } = await admin
       .from("sessions")
@@ -59,7 +55,7 @@ export async function POST(req: Request) {
     const ended = !!s.ended_at || String(s.status || "").toLowerCase() === "ended";
     if (ended) return NextResponse.json({ error: "Session already ended" }, { status: 400 });
 
-    // ✅ new QR each click (same as admin behavior)
+    // new token each click
     const tokenPayload = {
       sid: session_id,
       nonce: crypto.randomBytes(16).toString("hex"),
