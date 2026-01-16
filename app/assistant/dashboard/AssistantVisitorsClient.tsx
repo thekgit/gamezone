@@ -4,13 +4,25 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { useRouter } from "next/navigation";
 
+type RowPerson = {
+  user_id: string | null;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  employee_id: string | null;
+};
+
 type Row = {
   id: string;
   created_at: string;
 
+  // legacy (keep)
   full_name: string | null;
   phone: string | null;
   email: string | null;
+
+  // ✅ IMPORTANT (what admin uses)
+  people?: RowPerson[];
 
   game_name: string | null;
   players: number | null;
@@ -34,9 +46,13 @@ function dt(iso?: string | null) {
   if (!iso) return "-";
   return new Date(iso).toLocaleString();
 }
+
 function t(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function AssistantVisitorsClient() {
@@ -55,7 +71,11 @@ export default function AssistantVisitorsClient() {
   const load = async () => {
     setMsg("");
     try {
-      const res = await fetch("/api/assistant/visitors", { cache: "no-store", credentials: "include" });
+      const res = await fetch("/api/assistant/visitors", {
+        cache: "no-store",
+        credentials: "include",
+      });
+
       const data = await res.json().catch(() => ({}));
 
       if (res.status === 401) {
@@ -84,16 +104,42 @@ export default function AssistantVisitorsClient() {
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
-      const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+      const completed =
+        (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
       m.set(r.id, completed);
     }
     return m;
   }, [rows]);
 
+  // ✅ remove QR cards for completed sessions
   useEffect(() => {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
+  // ✅ make label similar to admin
+  const makeLabel = (r: Row) => {
+    const namePart =
+      Array.isArray(r.people) && r.people.length > 0
+        ? r.people
+            .map((p) =>
+              [p.full_name || "-", p.employee_id ? `• ${p.employee_id}` : ""]
+                .filter(Boolean)
+                .join(" ")
+            )
+            .join(" | ")
+        : r.full_name || "(No name)";
+
+    return [
+      namePart,
+      r.game_name ? `• ${r.game_name}` : "",
+      r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
+      typeof r.players === "number" ? `• Players: ${r.players}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  };
+
+  // ✅ FIXED: regenerate QR in same place (no duplicates)
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -110,32 +156,33 @@ export default function AssistantVisitorsClient() {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMsg((data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`);
+        setMsg(
+          (data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`
+        );
         return;
       }
 
-      const exit_url: string = data.exit_url;
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      const exit_url: string | undefined = data?.exit_url;
+      if (!exit_url || typeof exit_url !== "string") {
+        setMsg("exit_url missing from /api/assistant/exit-code response");
+        return;
+      }
 
-      const label = [
-        r.full_name || "Guest",
-        r.game_name ? `• ${r.game_name}` : "",
-        r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
-        typeof r.players === "number" ? `• Players: ${r.players}` : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
+      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
       const item: QrItem = {
         session_id,
-        label,
+        label: makeLabel(r),
         dataUrl,
         exit_url,
         generatedAt: new Date().toLocaleString(),
       };
 
-      // Keep generating new QRs each click (same as your old behavior)
-      setQrs((prev) => [item, ...prev]);
+      // ✅ SAME AS ADMIN: replace QR for this session only
+      setQrs((prev) => {
+        const withoutThis = prev.filter((x) => x.session_id !== session_id);
+        return [item, ...withoutThis];
+      });
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
@@ -175,13 +222,15 @@ export default function AssistantVisitorsClient() {
 
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
-      {/* Tablet optimized container */}
-      <div className="mx-auto w-full max-w-4xl space-y-5">
+      <div className="mx-auto w-full max-w-6xl space-y-6">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">Visitors (Active only) • Limited access</p>
+            <p className="text-white/60 text-sm">
+              Visitors (Active only) • Limited access
+            </p>
           </div>
+
           <button
             onClick={logout}
             className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500"
@@ -192,17 +241,28 @@ export default function AssistantVisitorsClient() {
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* QR panel */}
+        {/* ✅ QR PANEL (same behavior as admin) */}
         {qrs.length > 0 && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="font-semibold mb-3">Generated Exit QRs</div>
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {qrs.slice(0, 9).map((q, idx) => (
-                <div key={`${q.session_id}-${q.generatedAt}-${idx}`} className="rounded-xl border border-white/10 bg-black/30 p-3">
+              {qrs.map((q) => (
+                <div
+                  key={q.session_id}
+                  className="rounded-xl border border-white/10 bg-black/30 p-3"
+                >
                   <div className="text-sm font-semibold">{q.label}</div>
-                  <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
+                  <div className="text-xs text-white/50 mt-1">
+                    Generated: {q.generatedAt}
+                  </div>
+
                   <div className="mt-3 flex justify-center">
                     <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
+                  </div>
+
+                  <div className="mt-2 text-xs text-white/40 break-all">
+                    Session: {q.session_id}
                   </div>
                 </div>
               ))}
@@ -210,47 +270,136 @@ export default function AssistantVisitorsClient() {
           </div>
         )}
 
-        {/* Table */}
+        {/* ✅ TABLE (same columns like admin, minus delete entry) */}
         <div className="overflow-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Timestamp</th>
                 <th className="p-3 text-left">Name</th>
+                <th className="p-3 text-left">Phone</th>
+                <th className="p-3 text-left">Email</th>
                 <th className="p-3 text-left">Game</th>
                 <th className="p-3 text-left">Players</th>
                 <th className="p-3 text-left">Slot</th>
+                <th className="p-3 text-left">Exit Time</th>
                 <th className="p-3 text-left">End Session</th>
                 <th className="p-3 text-left">QR</th>
               </tr>
             </thead>
+
             <tbody>
               {rows.map((r) => {
+                const completed =
+                  (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+
                 return (
-                  <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
+                  <tr
+                    key={r.id}
+                    className="border-t border-white/10 hover:bg-white/5"
+                  >
                     <td className="p-3">{dt(r.created_at)}</td>
-                    <td className="p-3">{r.full_name || "Guest"}</td>
+
+                    {/* ✅ names list like admin */}
+                    <td className="p-3">
+                      {Array.isArray(r.people) && r.people.length > 0 ? (
+                        <div className="space-y-2">
+                          {r.people.map((p, idx) => (
+                            <div
+                              key={(p.user_id || "") + "_" + idx}
+                              className="leading-snug"
+                            >
+                              <div className="font-semibold">
+                                {p.full_name || "-"}
+                                {p.employee_id ? (
+                                  <span className="text-white/50 font-normal">
+                                    {" "}
+                                    • {p.employee_id}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        r.full_name || "-"
+                      )}
+                    </td>
+
+                    {/* ✅ phone list like admin */}
+                    <td className="p-3">
+                      {Array.isArray(r.people) && r.people.length > 0 ? (
+                        <div className="space-y-2">
+                          {r.people.map((p, idx) => (
+                            <div
+                              key={(p.user_id || "") + "_ph_" + idx}
+                              className="text-white/80"
+                            >
+                              {p.phone || "-"}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        r.phone || "-"
+                      )}
+                    </td>
+
+                    {/* ✅ email list like admin */}
+                    <td className="p-3">
+                      {Array.isArray(r.people) && r.people.length > 0 ? (
+                        <div className="space-y-2">
+                          {r.people.map((p, idx) => (
+                            <div
+                              key={(p.user_id || "") + "_em_" + idx}
+                              className="text-white/80 break-all"
+                            >
+                              {p.email || "-"}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        r.email || "-"
+                      )}
+                    </td>
+
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
-                    <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
+                    <td className="p-3">
+                      {r.slot_start
+                        ? `${t(r.slot_start)} – ${t(r.slot_end)}`
+                        : "-"}
+                    </td>
+                    <td className="p-3">{t(r.exit_time)}</td>
 
                     <td className="p-3">
-                      <button
-                        onClick={() => setEndTarget(r)}
-                        className="rounded-xl bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
-                      >
-                        End
-                      </button>
+                      {completed ? (
+                        <span className="text-green-400 font-semibold">
+                          Completed
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setEndTarget(r)}
+                          className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
+                        >
+                          End Session
+                        </button>
+                      )}
                     </td>
 
                     <td className="p-3">
-                      <button
-                        onClick={() => genQr(r)}
-                        disabled={!!generating[r.id]}
-                        className="rounded-xl bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
-                      >
-                        {generating[r.id] ? "Generating..." : "Generate QR"}
-                      </button>
+                      {completed ? (
+                        <span className="text-green-400 font-semibold">
+                          Session Completed
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => genQr(r)}
+                          disabled={!!generating[r.id]}
+                          className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
+                        >
+                          {generating[r.id] ? "Generating..." : "Generate QR"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -258,7 +407,7 @@ export default function AssistantVisitorsClient() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td className="p-4 text-white/60" colSpan={7}>
+                  <td className="p-4 text-white/60" colSpan={10}>
                     No active sessions found.
                   </td>
                 </tr>
@@ -291,12 +440,15 @@ export default function AssistantVisitorsClient() {
                 >
                   No
                 </button>
+
                 <button
                   onClick={async () => {
                     const target = endTarget;
                     if (!target) return;
+
                     const ok = await endSession(target);
                     if (!ok) return;
+
                     setEndTarget(null);
                     await load();
                   }}
