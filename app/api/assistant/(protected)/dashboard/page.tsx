@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { useRouter } from "next/navigation";
 
-type Person = {
+type RowPerson = {
   user_id: string | null;
   full_name: string | null;
   phone: string | null;
@@ -14,8 +14,14 @@ type Person = {
 
 type Row = {
   id: string;
-  people?: Person[];
   created_at: string;
+
+  full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+
+  people?: RowPerson[];
+
   game_name: string | null;
   players: number | null;
   slot_start: string | null;
@@ -41,32 +47,7 @@ function t(iso?: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-// ✅ same “people rendering” style as admin
-function PeopleBlock({ people }: { people?: Person[] }) {
-  const list = Array.isArray(people) ? people : [];
-  if (list.length === 0) return <div className="text-white/60">-</div>;
-
-  return (
-    <div className="space-y-2">
-      {list.map((p, idx) => (
-        <div key={(p.user_id || "x") + ":" + idx} className="leading-5">
-          <div className="font-semibold">
-            {(p.full_name || "Guest")}
-            {p.employee_id ? ` • ${p.employee_id}` : ""}
-          </div>
-          <div className="text-xs text-white/60">
-            {(p.phone || "-")}
-          </div>
-          <div className="text-xs text-white/60">
-            {(p.email || "-")}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export default function AssistantDashboard() {
+export default function AssistantDashboardClient() {
   const router = useRouter();
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -86,8 +67,8 @@ export default function AssistantDashboard() {
         cache: "no-store",
         credentials: "include",
       });
-
       const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
         if (res.status === 401) router.replace("/assistant/login");
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
@@ -118,8 +99,6 @@ export default function AssistantDashboard() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
-  // ✅ Make assistant QR match admin behavior (random each click)
-  // This assumes /api/assistant/exit-code returns a fresh token/exit_url like admin.
   const genQr = async (r: Row) => {
     const session_id = r.id;
     setMsg("");
@@ -147,11 +126,11 @@ export default function AssistantDashboard() {
 
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
-      // ✅ label similar to admin (people + game + slot)
-      const p0 = r.people?.[0];
+      // ✅ Make label similar to admin: name/email/game/slot/players
+      const main = Array.isArray(r.people) && r.people.length > 0 ? r.people[0] : null;
       const label = [
-        (p0?.full_name || "Guest") + (p0?.employee_id ? ` • ${p0.employee_id}` : ""),
-        ...(r.people?.slice(1).map((p) => (p.full_name || "Guest") + (p.employee_id ? ` • ${p.employee_id}` : "")) || []),
+        main?.full_name || r.full_name || "(No name)",
+        main?.email || r.email ? `• ${main?.email || r.email}` : "",
         r.game_name ? `• ${r.game_name}` : "",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
@@ -172,7 +151,7 @@ export default function AssistantDashboard() {
         return [item, ...withoutThis];
       });
     } catch (e: any) {
-      setMsg(e?.message || "QR generation failed");
+      setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
       setGenerating((g) => ({ ...g, [session_id]: false }));
     }
@@ -217,30 +196,30 @@ export default function AssistantDashboard() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">Active sessions only • Actions: End + Generate QR</p>
+            <p className="text-white/60 text-sm">Active sessions only • End + Generate QR</p>
           </div>
-
-          <button
-            onClick={logout}
-            className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500"
-          >
+          <button onClick={logout} className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500">
             Logout
           </button>
         </div>
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
+        {/* ✅ QR PANEL (same style as admin) */}
         {qrs.length > 0 && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="font-semibold mb-3">Active Exit QRs</div>
+
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {qrs.map((q) => (
                 <div key={q.session_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
                   <div className="text-sm font-semibold">{q.label}</div>
                   <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
+
                   <div className="mt-3 flex justify-center">
                     <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
                   </div>
+
                   <div className="mt-2 text-xs text-white/40 break-all">Session: {q.session_id}</div>
                 </div>
               ))}
@@ -270,16 +249,32 @@ export default function AssistantDashboard() {
                   <tr key={r.id} className="border-t border-white/10 hover:bg-white/5 align-top">
                     <td className="p-3">{dt(r.created_at)}</td>
 
-                    {/* ✅ Now shows keyur • kp12 + DHRUV • DK12345 etc */}
+                    {/* ✅ EXACT admin-like people rendering */}
                     <td className="p-3">
-                      <PeopleBlock people={r.people} />
+                      {Array.isArray(r.people) && r.people.length > 0 ? (
+                        <div className="space-y-2">
+                          {r.people.map((p, idx) => (
+                            <div key={(p.user_id || "x") + "_" + idx} className="leading-snug">
+                              <div className="font-semibold">
+                                {p.full_name || "-"}
+                                {p.employee_id ? (
+                                  <span className="text-white/50 font-normal"> • {p.employee_id}</span>
+                                ) : null}
+                              </div>
+                              <div className="text-white/70 text-xs break-all">
+                                {(p.phone || "-")} • {(p.email || "-")}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-white/60">-</div>
+                      )}
                     </td>
 
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
-                    <td className="p-3">
-                      {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
-                    </td>
+                    <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
 
                     <td className="p-3">
                       {completed ? (
@@ -322,6 +317,7 @@ export default function AssistantDashboard() {
           </table>
         </div>
 
+        {/* End session modal */}
         {endTarget && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
@@ -345,15 +341,12 @@ export default function AssistantDashboard() {
                 >
                   No
                 </button>
-
                 <button
                   onClick={async () => {
                     const target = endTarget;
                     if (!target) return;
-
                     const ok = await endSession(target);
                     if (!ok) return;
-
                     setEndTarget(null);
                     await load();
                   }}

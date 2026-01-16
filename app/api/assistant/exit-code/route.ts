@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAssistant } from "@/lib/assertAssistant";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+function mkToken(len = 16) {
+  return crypto.randomBytes(len).toString("hex");
+}
+
 function originFromReq(req: Request) {
-  const o = req.headers.get("origin");
-  if (o) return o;
-  const host = req.headers.get("host");
-  return host ? `https://${host}` : "";
+  // Works on Vercel + local
+  const h = req.headers;
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host");
+  if (host) return `${proto}://${host}`;
+  // fallback
+  return "https://k-e18b.vercel.app";
 }
 
 export async function POST(req: Request) {
@@ -20,31 +28,36 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();
-    if (!session_id) return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
+    if (!session_id) return NextResponse.json({ error: "session_id required" }, { status: 400 });
 
     const admin = supabaseAdmin();
 
-    const { data: s, error } = await admin
+    // 1) read existing token
+    const { data: sess, error: sErr } = await admin
       .from("sessions")
-      .select("id, exit_token, ended_at, status")
+      .select("id, exit_token")
       .eq("id", session_id)
-      .single();
+      .maybeSingle();
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+    if (!sess?.id) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    const st = String(s.status || "").toLowerCase();
-    if (s.ended_at || st === "ended" || st === "completed") {
-      return NextResponse.json({ error: "Session already ended" }, { status: 409 });
+    let exit_token = String(sess.exit_token || "").trim();
+
+    // 2) ensure token exists
+    if (!exit_token) {
+      exit_token = mkToken(16);
+      const { error: uErr } = await admin
+        .from("sessions")
+        .update({ exit_token })
+        .eq("id", session_id);
+
+      if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
     }
 
-    if (!s.exit_token) return NextResponse.json({ error: "exit_token missing on session" }, { status: 500 });
-
-    const origin = originFromReq(req);
-    if (!origin) return NextResponse.json({ error: "Cannot determine site origin" }, { status: 500 });
-
-    const exit_url = `${origin}/exit?session_id=${encodeURIComponent(s.id)}&token=${encodeURIComponent(
-      String(s.exit_token)
+    const base = originFromReq(req);
+    const exit_url = `${base}/exit?session_id=${encodeURIComponent(session_id)}&token=${encodeURIComponent(
+      exit_token
     )}`;
 
     return NextResponse.json({ ok: true, exit_url }, { status: 200 });
