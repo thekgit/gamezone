@@ -110,7 +110,13 @@ export default function AssistantVisitorsClient() {
     }
     return m;
   }, [rows]);
-
+  // ✅ assistant API returns ONLY active rows.
+// So once a session ends, it disappears from rows.
+// Remove QRs that are not present in active rows anymore.
+  useEffect(() => {
+    const activeIds = new Set(rows.map((r) => r.id));
+    setQrs((prev) => prev.filter((q) => activeIds.has(q.session_id)));
+  }, [rows]);
   // ✅ remove QR cards for completed sessions
   useEffect(() => {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
@@ -450,6 +456,8 @@ export default function AssistantVisitorsClient() {
                     if (!ok) return;
 
                     setEndTarget(null);
+                    setQrs((prev) => prev.filter((q) => q.session_id !== target.id));
+
                     await load();
                   }}
                   className="flex-1 rounded-xl bg-blue-600 py-2.5 font-semibold disabled:opacity-50"
