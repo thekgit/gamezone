@@ -14,7 +14,7 @@ function maskName(name: string | null) {
 
 export async function GET() {
   try {
-    if (!(await assertAssistant())) {
+    if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });{
       return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
     }
 
