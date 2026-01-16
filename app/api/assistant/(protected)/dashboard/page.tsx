@@ -4,15 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { useRouter } from "next/navigation";
 
+type Person = {
+  user_id: string | null;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  employee_id: string | null;
+};
+
 type Row = {
   id: string;
-  people?: {
-    user_id: string | null;
-    full_name: string | null;
-    phone: string | null;
-    email: string | null;
-    employee_id: string | null;
-  }[];
+  people?: Person[];
   created_at: string;
   game_name: string | null;
   players: number | null;
@@ -62,7 +64,6 @@ export default function AssistantDashboard() {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        // if unauthorized -> go login
         if (res.status === 401) router.replace("/assistant/login");
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
@@ -174,14 +175,11 @@ export default function AssistantDashboard() {
 
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
-      {/* tablet friendly container */}
-      <div className="mx-auto w-full max-w-5xl space-y-6">
+      <div className="mx-auto w-full max-w-6xl space-y-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">
-              Active sessions only • No visitor personal details shown
-            </p>
+            <p className="text-white/60 text-sm">Active sessions only</p>
           </div>
           <button
             onClick={logout}
@@ -193,7 +191,6 @@ export default function AssistantDashboard() {
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* QR PANEL */}
         {qrs.length > 0 && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="font-semibold mb-3">Active Exit QRs</div>
@@ -231,44 +228,65 @@ export default function AssistantDashboard() {
             <tbody>
               {rows.map((r) => {
                 const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+                const people = Array.isArray(r.people) ? r.people : [];
 
                 return (
-                  <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
+                  <tr key={r.id} className="border-t border-white/10 hover:bg-white/5 align-top">
                     <td className="p-3">{dt(r.created_at)}</td>
+
+                    {/* Name stack */}
                     <td className="p-3">
-                      <div className="space-y-1">
-                        {(r.people?.length ? r.people : []).map((p, idx) => (
-                          <div key={idx} className="leading-snug">
-                            <div className="font-semibold">
-                              {(p.full_name || "-")}{p.employee_id ? ` • ${p.employee_id}` : ""}
+                      {people.length === 0 ? (
+                        <div className="text-white/60">-</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {people.map((p, idx) => (
+                            <div key={idx} className="leading-snug">
+                              <div className="font-semibold">
+                                {(p.full_name || "-")}
+                                {p.employee_id ? ` • ${p.employee_id}` : ""}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
 
+                    {/* Phone stack */}
                     <td className="p-3">
-                      <div className="space-y-1">
-                        {(r.people?.length ? r.people : []).map((p, idx) => (
-                          <div key={idx} className="text-white/80">
-                            {p.phone || "-"}
-                          </div>
-                        ))}
-                      </div>
+                      {people.length === 0 ? (
+                        <div className="text-white/60">-</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {people.map((p, idx) => (
+                            <div key={idx} className="text-white/80">
+                              {p.phone || "-"}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
 
+                    {/* Email stack */}
                     <td className="p-3">
-                      <div className="space-y-1">
-                        {(r.people?.length ? r.people : []).map((p, idx) => (
-                          <div key={idx} className="text-white/80 break-all">
-                            {p.email || "-"}
-                          </div>
-                        ))}
-                      </div>
+                      {people.length === 0 ? (
+                        <div className="text-white/60">-</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {people.map((p, idx) => (
+                            <div key={idx} className="text-white/80 break-all">
+                              {p.email || "-"}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
+
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
-                    <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
+                    <td className="p-3">
+                      {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
+                    </td>
 
                     <td className="p-3">
                       {completed ? (
@@ -311,7 +329,6 @@ export default function AssistantDashboard() {
           </table>
         </div>
 
-        {/* End session modal */}
         {endTarget && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">

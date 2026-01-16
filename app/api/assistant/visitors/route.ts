@@ -54,7 +54,7 @@ export async function GET() {
 
     const sessionRows = (data || []) as any[];
 
-    // ✅ collect all ids we need
+    // ✅ collect all ids we need (owner + added players)
     const idsToFetch = new Set<string>();
     for (const s of sessionRows) {
       if (s.user_id) idsToFetch.add(String(s.user_id));
@@ -64,6 +64,7 @@ export async function GET() {
 
     const idList = Array.from(idsToFetch);
 
+    // ✅ pull profiles for all involved users
     const profilesMap = new Map<string, any>();
     if (idList.length > 0) {
       const { data: profs, error: pErr } = await admin
@@ -84,7 +85,7 @@ export async function GET() {
       const mainId = s.user_id ? String(s.user_id) : "";
       const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-      // ✅ main person (prefer stored visitor_*; fallback to profiles)
+      // ✅ main person: prefer stored visitor_* (works even if profile is missing)
       const mainPerson: Person = {
         user_id: mainId || null,
         full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
@@ -93,7 +94,7 @@ export async function GET() {
         employee_id: mainProfile?.employee_id ?? null,
       };
 
-      // ✅ other players
+      // ✅ other players: use profiles
       const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
       const others: Person[] = otherIds
         .map((pid: any) => profilesMap.get(String(pid)))
@@ -117,9 +118,7 @@ export async function GET() {
         slot_end: s.ends_at ?? null,
         status: s.status ?? null,
         exit_time: s.ended_at ?? null,
-
-        // ✅ send people[] so UI can render names/emails/phones
-        people,
+        people, // ✅ this fixes "Guest"
       };
     });
 
