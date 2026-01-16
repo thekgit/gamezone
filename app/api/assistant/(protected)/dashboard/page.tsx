@@ -47,13 +47,22 @@ function t(iso?: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function personLine(p: RowPerson) {
+  const name = p.full_name || "-";
+  const emp = p.employee_id ? ` • ${p.employee_id}` : "";
+  return `${name}${emp}`;
+}
+
 export default function AssistantDashboardClient() {
   const router = useRouter();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
 
-  const [qrs, setQrs] = useState<QrItem[]>([]);
+  // ✅ IMPORTANT CHANGE: store QRs as a map to prevent duplicates forever
+  const [qrsBySession, setQrsBySession] = useState<Record<string, QrItem>>({});
+
+  // generating lock per session
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
   const [endTarget, setEndTarget] = useState<Row | null>(null);
@@ -74,6 +83,7 @@ export default function AssistantDashboardClient() {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
+
       setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
@@ -84,8 +94,10 @@ export default function AssistantDashboardClient() {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ remove QR for sessions that completed
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
@@ -96,11 +108,21 @@ export default function AssistantDashboardClient() {
   }, [rows]);
 
   useEffect(() => {
-    setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
+    setQrsBySession((prev) => {
+      const next: Record<string, QrItem> = {};
+      for (const [sid, item] of Object.entries(prev)) {
+        if (!completedMap.get(sid)) next[sid] = item;
+      }
+      return next;
+    });
   }, [completedMap]);
 
   const genQr = async (r: Row) => {
     const session_id = r.id;
+
+    // ✅ HARD BLOCK: prevent multi-click spamming from creating multiple QRs
+    if (generating[session_id]) return;
+
     setMsg("");
     setGenerating((g) => ({ ...g, [session_id]: true }));
 
@@ -126,11 +148,15 @@ export default function AssistantDashboardClient() {
 
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
-      // ✅ Make label similar to admin: name/email/game/slot/players
-      const main = Array.isArray(r.people) && r.people.length > 0 ? r.people[0] : null;
+      // ✅ Label: show all people names like admin
+      const people = Array.isArray(r.people) ? r.people : [];
+      const peopleLabel =
+        people.length > 0
+          ? people.map(personLine).join(" | ")
+          : (r.full_name || "Guest");
+
       const label = [
-        main?.full_name || r.full_name || "(No name)",
-        main?.email || r.email ? `• ${main?.email || r.email}` : "",
+        peopleLabel,
         r.game_name ? `• ${r.game_name}` : "",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
@@ -146,10 +172,8 @@ export default function AssistantDashboardClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      setQrs((prev) => {
-        const withoutThis = prev.filter((x) => x.session_id !== session_id);
-        return [item, ...withoutThis];
-      });
+      // ✅ overwrite by session_id (NEVER duplicates)
+      setQrsBySession((prev) => ({ ...prev, [session_id]: item }));
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
@@ -173,6 +197,8 @@ export default function AssistantDashboardClient() {
         setEndErr(data?.error || "Failed to end session");
         return false;
       }
+
+      // after end, reload to remove it from list
       return true;
     } catch (e: any) {
       setEndErr(e?.message || "Failed to end session");
@@ -190,6 +216,8 @@ export default function AssistantDashboardClient() {
     }
   };
 
+  const qrs = useMemo(() => Object.values(qrsBySession), [qrsBySession]);
+
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
       <div className="mx-auto w-full max-w-6xl space-y-6">
@@ -198,17 +226,20 @@ export default function AssistantDashboardClient() {
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
             <p className="text-white/60 text-sm">Active sessions only • End + Generate QR</p>
           </div>
-          <button onClick={logout} className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500">
+          <button
+            onClick={logout}
+            className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500"
+          >
             Logout
           </button>
         </div>
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* ✅ QR PANEL (same style as admin) */}
+        {/* ✅ QR PANEL */}
         {qrs.length > 0 && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="font-semibold mb-3">Active Exit QRs</div>
+            <div className="font-semibold mb-3">Generated Exit QRs</div>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {qrs.map((q) => (
@@ -229,7 +260,7 @@ export default function AssistantDashboardClient() {
 
         <div className="overflow-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
           <table className="w-full text-sm">
-          <thead className="bg-white/5 text-white/70">
+            <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Timestamp</th>
                 <th className="p-3 text-left">Name</th>
@@ -282,7 +313,7 @@ export default function AssistantDashboardClient() {
                           ))}
                         </div>
                       ) : (
-                        r.people?.[0]?.phone || "-"
+                        "-"
                       )}
                     </td>
 
@@ -297,7 +328,7 @@ export default function AssistantDashboardClient() {
                           ))}
                         </div>
                       ) : (
-                        r.people?.[0]?.email || "-"
+                        "-"
                       )}
                     </td>
 
@@ -313,7 +344,7 @@ export default function AssistantDashboardClient() {
                           onClick={() => setEndTarget(r)}
                           className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
                         >
-                          End Session
+                          End
                         </button>
                       )}
                     </td>
