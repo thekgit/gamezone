@@ -1,3 +1,4 @@
+// app/api/assistant/visitors/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAssistant } from "@/lib/assertAssistant";
@@ -11,9 +12,9 @@ export async function GET() {
     if (!ok) return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
 
     const admin = supabaseAdmin();
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
 
-    // ✅ include user_id + player_user_ids + visitor fields (same as admin)
+    // ✅ Fetch recent sessions (then filter safely in JS)
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -33,16 +34,26 @@ export async function GET() {
         games:game_id ( name )
       `
       )
-      // ✅ assistant sees ACTIVE only
-      .is("ended_at", null)
-      .or("status.eq.active,status.is.null")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
       .order("created_at", { ascending: false })
       .limit(5000);
 
     if (error) return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
 
-    const sessionRows = (data || []) as any[];
+    // ✅ Assistant should see ACTIVE only (hard filter)
+    const sessionRows = (data || []).filter((s: any) => {
+      const st = String(s.status || "").toLowerCase();
+      const ended = !!s.ended_at || st === "ended" || st === "completed";
+      if (ended) return false;
+
+      // if ends_at exists and already passed, consider not active for assistant
+      if (s.ends_at) {
+        const ends = new Date(String(s.ends_at)).getTime();
+        if (!Number.isNaN(ends) && ends <= nowMs) return false;
+      }
+
+      // otherwise active
+      return true;
+    });
 
     // ✅ resolve people like admin
     const idsToFetch = new Set<string>();
@@ -90,7 +101,6 @@ export async function GET() {
           employee_id: p.employee_id ?? null,
         }));
 
-      // ✅ avoid duplicates
       const seen = new Set<string>();
       const people = [mainPerson, ...others].filter((p: any) => {
         const id = String(p.user_id || "");
