@@ -6,6 +6,13 @@ import { useRouter } from "next/navigation";
 
 type Row = {
   id: string;
+  people?: {
+    user_id: string | null;
+    full_name: string | null;
+    phone: string | null;
+    email: string | null;
+    employee_id: string | null;
+  }[];
   created_at: string;
   game_name: string | null;
   players: number | null;
@@ -210,6 +217,9 @@ export default function AssistantDashboard() {
             <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Timestamp</th>
+                <th className="p-3 text-left">Name</th>
+                <th className="p-3 text-left">Phone</th>
+                <th className="p-3 text-left">Email</th>
                 <th className="p-3 text-left">Game</th>
                 <th className="p-3 text-left">Players</th>
                 <th className="p-3 text-left">Slot</th>
@@ -225,6 +235,37 @@ export default function AssistantDashboard() {
                 return (
                   <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                     <td className="p-3">{dt(r.created_at)}</td>
+                    <td className="p-3">
+                      <div className="space-y-1">
+                        {(r.people?.length ? r.people : []).map((p, idx) => (
+                          <div key={idx} className="leading-snug">
+                            <div className="font-semibold">
+                              {(p.full_name || "-")}{p.employee_id ? ` • ${p.employee_id}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+
+                    <td className="p-3">
+                      <div className="space-y-1">
+                        {(r.people?.length ? r.people : []).map((p, idx) => (
+                          <div key={idx} className="text-white/80">
+                            {p.phone || "-"}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+
+                    <td className="p-3">
+                      <div className="space-y-1">
+                        {(r.people?.length ? r.people : []).map((p, idx) => (
+                          <div key={idx} className="text-white/80 break-all">
+                            {p.email || "-"}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
                     <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
@@ -261,7 +302,7 @@ export default function AssistantDashboard() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td className="p-4 text-white/60" colSpan={6}>
+                  <td className="p-4 text-white/60" colSpan={9}>
                     No active sessions found.
                   </td>
                 </tr>
