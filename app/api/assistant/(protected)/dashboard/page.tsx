@@ -22,11 +22,6 @@ type Row = {
   slot_end: string | null;
   status: string | null;
   exit_time: string | null;
-
-  // backward compat (just in case)
-  full_name?: string | null;
-  phone?: string | null;
-  email?: string | null;
 };
 
 type QrItem = {
@@ -46,29 +41,32 @@ function t(iso?: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function renderPeopleCell(people?: Person[]) {
+// ✅ same “people rendering” style as admin
+function PeopleBlock({ people }: { people?: Person[] }) {
   const list = Array.isArray(people) ? people : [];
   if (list.length === 0) return <div className="text-white/60">-</div>;
 
   return (
-    <div className="space-y-1">
-      {list.map((p, idx) => {
-        const nameLine =
-          (p.full_name || "Guest") + (p.employee_id ? ` • ${p.employee_id}` : "");
-        return (
-          <div key={(p.user_id || "x") + "-" + idx} className="leading-5">
-            <div className="font-semibold">{nameLine}</div>
-            <div className="text-xs text-white/60">
-              {p.phone || "-"} • {p.email || "-"}
-            </div>
+    <div className="space-y-2">
+      {list.map((p, idx) => (
+        <div key={(p.user_id || "x") + ":" + idx} className="leading-5">
+          <div className="font-semibold">
+            {(p.full_name || "Guest")}
+            {p.employee_id ? ` • ${p.employee_id}` : ""}
           </div>
-        );
-      })}
+          <div className="text-xs text-white/60">
+            {(p.phone || "-")}
+          </div>
+          <div className="text-xs text-white/60">
+            {(p.email || "-")}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-export default function AssistantDashboardClient() {
+export default function AssistantDashboard() {
   const router = useRouter();
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -95,7 +93,6 @@ export default function AssistantDashboardClient() {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
-
       setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
@@ -121,6 +118,8 @@ export default function AssistantDashboardClient() {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
+  // ✅ Make assistant QR match admin behavior (random each click)
+  // This assumes /api/assistant/exit-code returns a fresh token/exit_url like admin.
   const genQr = async (r: Row) => {
     const session_id = r.id;
     setMsg("");
@@ -140,11 +139,19 @@ export default function AssistantDashboardClient() {
         return;
       }
 
-      const exit_url: string = data.exit_url;
+      const exit_url: string | undefined = data?.exit_url;
+      if (!exit_url || typeof exit_url !== "string") {
+        setMsg("exit_url missing from /api/assistant/exit-code response");
+        return;
+      }
+
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
+      // ✅ label similar to admin (people + game + slot)
+      const p0 = r.people?.[0];
       const label = [
-        (r.people?.[0]?.full_name || r.full_name || "Guest"),
+        (p0?.full_name || "Guest") + (p0?.employee_id ? ` • ${p0.employee_id}` : ""),
+        ...(r.people?.slice(1).map((p) => (p.full_name || "Guest") + (p.employee_id ? ` • ${p.employee_id}` : "")) || []),
         r.game_name ? `• ${r.game_name}` : "",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
@@ -164,6 +171,8 @@ export default function AssistantDashboardClient() {
         const withoutThis = prev.filter((x) => x.session_id !== session_id);
         return [item, ...withoutThis];
       });
+    } catch (e: any) {
+      setMsg(e?.message || "QR generation failed");
     } finally {
       setGenerating((g) => ({ ...g, [session_id]: false }));
     }
@@ -208,8 +217,9 @@ export default function AssistantDashboardClient() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">Active sessions only</p>
+            <p className="text-white/60 text-sm">Active sessions only • Actions: End + Generate QR</p>
           </div>
+
           <button
             onClick={logout}
             className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500"
@@ -259,10 +269,17 @@ export default function AssistantDashboardClient() {
                 return (
                   <tr key={r.id} className="border-t border-white/10 hover:bg-white/5 align-top">
                     <td className="p-3">{dt(r.created_at)}</td>
-                    <td className="p-3">{renderPeopleCell(r.people)}</td>
+
+                    {/* ✅ Now shows keyur • kp12 + DHRUV • DK12345 etc */}
+                    <td className="p-3">
+                      <PeopleBlock people={r.people} />
+                    </td>
+
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
-                    <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
+                    <td className="p-3">
+                      {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
+                    </td>
 
                     <td className="p-3">
                       {completed ? (
@@ -328,12 +345,15 @@ export default function AssistantDashboardClient() {
                 >
                   No
                 </button>
+
                 <button
                   onClick={async () => {
                     const target = endTarget;
                     if (!target) return;
+
                     const ok = await endSession(target);
                     if (!ok) return;
+
                     setEndTarget(null);
                     await load();
                   }}

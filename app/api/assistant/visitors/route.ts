@@ -13,11 +13,10 @@ type Person = {
   employee_id: string | null;
 };
 
-function cleanEmail(v: any) {
+function normEmail(v: any) {
   const s = String(v || "").trim().toLowerCase();
   return s || null;
 }
-
 function isGuestLike(v: any) {
   const s = String(v || "").trim().toLowerCase();
   return !s || s === "guest" || s === "-" || s === "null";
@@ -32,7 +31,7 @@ export async function GET() {
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // ✅ MUST SELECT user_id + player_user_ids otherwise you can NEVER resolve people
+    // ✅ must include user_id + player_user_ids + visitor_*
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -62,7 +61,7 @@ export async function GET() {
 
     const sessionRows = (data || []) as any[];
 
-    // ---------- Collect IDs + Emails needed ----------
+    // -------- Collect all IDs + emails we need ----------
     const idsToFetch = new Set<string>();
     const emailsToFetch = new Set<string>();
 
@@ -72,14 +71,14 @@ export async function GET() {
       const arr = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
       for (const pid of arr) if (pid) idsToFetch.add(String(pid));
 
-      const ve = cleanEmail(s.visitor_email);
+      const ve = normEmail(s.visitor_email);
       if (ve) emailsToFetch.add(ve);
     }
 
     const idList = Array.from(idsToFetch);
     const emailList = Array.from(emailsToFetch);
 
-    // ---------- Fetch profiles by user_id ----------
+    // -------- profiles by user_id ----------
     const profilesMap = new Map<string, any>();
     if (idList.length > 0) {
       const { data: profs, error: pErr } = await admin
@@ -88,12 +87,10 @@ export async function GET() {
         .in("user_id", idList);
 
       if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
-
       for (const p of profs || []) profilesMap.set(String(p.user_id), p);
     }
 
-    // ---------- Fallback: fetch company_employees by visitor_email ----------
-    // (in case some user has session stored but profile missing/incomplete)
+    // -------- company_employees by email fallback ----------
     const empByEmail = new Map<string, any>();
     if (emailList.length > 0) {
       const { data: emps, error: eErr } = await admin
@@ -104,40 +101,28 @@ export async function GET() {
       if (eErr) return NextResponse.json({ error: eErr.message, rows: [] }, { status: 500 });
 
       for (const e of emps || []) {
-        const em = cleanEmail(e.email);
+        const em = normEmail(e.email);
         if (em) empByEmail.set(em, e);
       }
     }
 
-    // ---------- Build rows ----------
+    // -------- Build rows (same shape as admin’s visitors) ----------
     const rows = sessionRows.map((s: any) => {
       const mainId = s.user_id ? String(s.user_id) : null;
       const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-      const ve = cleanEmail(s.visitor_email);
+      const ve = normEmail(s.visitor_email);
       const emp = ve ? empByEmail.get(ve) : null;
 
-      // ✅ If visitor_name is Guest-like, override with real profile/employee name
+      // If visitor_name is Guest-like, override using profile/employee
       const mainFullName =
         isGuestLike(s.visitor_name)
           ? (mainProfile?.full_name ?? emp?.full_name ?? null)
           : (s.visitor_name ?? mainProfile?.full_name ?? emp?.full_name ?? null);
 
-      const mainPhone =
-        (s.visitor_phone ?? null) ||
-        (mainProfile?.phone ?? null) ||
-        (emp?.phone ?? null) ||
-        null;
-
-      const mainEmail =
-        (s.visitor_email ?? null) ||
-        (mainProfile?.email ?? null) ||
-        (ve ?? null);
-
-      const mainEmployeeId =
-        (mainProfile?.employee_id ?? null) ||
-        (emp?.employee_id ?? null) ||
-        null;
+      const mainPhone = (s.visitor_phone ?? null) || (mainProfile?.phone ?? null) || (emp?.phone ?? null) || null;
+      const mainEmail = (s.visitor_email ?? null) || (mainProfile?.email ?? null) || (ve ?? null);
+      const mainEmployeeId = (mainProfile?.employee_id ?? null) || (emp?.employee_id ?? null) || null;
 
       const mainPerson: Person = {
         user_id: mainId,
@@ -164,17 +149,18 @@ export async function GET() {
       return {
         id: s.id,
         created_at: s.created_at,
-        game_name: s?.games?.name ?? null,
-        players: s.players ?? null,
-        slot_start: s.started_at ?? null,
-        slot_end: s.ends_at ?? null,
         status: s.status ?? null,
         exit_time: s.ended_at ?? null,
+        players: s.players ?? null,
 
-        // ✅ New field UI should use
+        game_name: s?.games?.name ?? null,
+        slot_start: s.started_at ?? null,
+        slot_end: s.ends_at ?? null,
+
+        // ✅ IMPORTANT (assistant UI needs this)
         people,
 
-        // ✅ Backward compat (if UI still reads these)
+        // backward compat
         full_name: people[0]?.full_name ?? null,
         phone: people[0]?.phone ?? null,
         email: people[0]?.email ?? null,
