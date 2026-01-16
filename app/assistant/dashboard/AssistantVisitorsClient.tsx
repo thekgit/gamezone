@@ -233,7 +233,7 @@ export default function AssistantVisitorsClient() {
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
             <p className="text-white/60 text-sm">
-              Visitors (Active only) • Limited access
+              Visitors
             </p>
           </div>
 
