@@ -60,7 +60,7 @@ export default function AssistantDashboardClient() {
   const [msg, setMsg] = useState("");
 
   // ✅ IMPORTANT CHANGE: store QRs as a map to prevent duplicates forever
-  const [qrsBySession, setQrsBySession] = useState<Record<string, QrItem>>({});
+  const [activeQr, setActiveQr] = useState<QrItem | null>(null);
 
   // generating lock per session
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
@@ -108,14 +108,11 @@ export default function AssistantDashboardClient() {
   }, [rows]);
 
   useEffect(() => {
-    setQrsBySession((prev) => {
-      const next: Record<string, QrItem> = {};
-      for (const [sid, item] of Object.entries(prev)) {
-        if (!completedMap.get(sid)) next[sid] = item;
-      }
-      return next;
-    });
-  }, [completedMap]);
+    if (!activeQr) return;
+    if (completedMap.get(activeQr.session_id)) {
+      setActiveQr(null);
+    }
+  }, [completedMap, activeQr]);
 
   const genQr = async (r: Row) => {
     const session_id = r.id;
@@ -173,7 +170,7 @@ export default function AssistantDashboardClient() {
       };
 
       // ✅ overwrite by session_id (NEVER duplicates)
-      setQrsBySession((prev) => ({ ...prev, [session_id]: item }));
+      setActiveQr(item);
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
@@ -216,7 +213,6 @@ export default function AssistantDashboardClient() {
     }
   };
 
-  const qrs = useMemo(() => Object.values(qrsBySession), [qrsBySession]);
 
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
@@ -237,23 +233,19 @@ export default function AssistantDashboardClient() {
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
         {/* ✅ QR PANEL */}
-        {qrs.length > 0 && (
+        {activeQr && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="font-semibold mb-3">Generated Exit QRs</div>
+            <div className="font-semibold mb-2">Exit QR</div>
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {qrs.map((q) => (
-                <div key={q.session_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
-                  <div className="text-sm font-semibold">{q.label}</div>
-                  <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
+            <div className="text-sm font-semibold">{activeQr.label}</div>
+            <div className="text-xs text-white/50 mt-1">Generated: {activeQr.generatedAt}</div>
 
-                  <div className="mt-3 flex justify-center">
-                    <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
-                  </div>
+            <div className="mt-3 flex justify-center">
+              <img src={activeQr.dataUrl} alt="Exit QR" className="rounded-lg" />
+            </div>
 
-                  <div className="mt-2 text-xs text-white/40 break-all">Session: {q.session_id}</div>
-                </div>
-              ))}
+            <div className="mt-2 text-xs text-white/40 break-all">
+              Session: {activeQr.session_id}
             </div>
           </div>
         )}
