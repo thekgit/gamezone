@@ -14,7 +14,7 @@ export async function GET() {
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // ✅ MUST include user_id + player_user_ids
+    // ✅ active only
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -44,7 +44,7 @@ export async function GET() {
 
     const sessionRows = (data || []) as any[];
 
-    // ✅ Collect ids for profiles lookup
+    // ✅ collect all ids (main + other players)
     const idsToFetch = new Set<string>();
     for (const s of sessionRows) {
       if (s.user_id) idsToFetch.add(String(s.user_id));
@@ -54,6 +54,7 @@ export async function GET() {
 
     const idList = Array.from(idsToFetch);
 
+    // ✅ fetch profiles once
     const profilesMap = new Map<string, any>();
     if (idList.length > 0) {
       const { data: profRows, error: pErr } = await admin
@@ -62,7 +63,6 @@ export async function GET() {
         .in("user_id", idList);
 
       if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
-
       for (const p of profRows || []) profilesMap.set(String(p.user_id), p);
     }
 
@@ -70,7 +70,7 @@ export async function GET() {
       const mainId = s.user_id ? String(s.user_id) : "";
       const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-      // ✅ main person fallback order: visitor_* -> profile
+      // ✅ main person (prefer visitor_* -> profile)
       const mainPerson = {
         user_id: mainId || null,
         full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
@@ -79,6 +79,7 @@ export async function GET() {
         employee_id: mainProfile?.employee_id ?? null,
       };
 
+      // ✅ others from player_user_ids
       const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
       const others = otherIds
         .map((pid: any) => profilesMap.get(String(pid)))
@@ -91,7 +92,7 @@ export async function GET() {
           employee_id: p.employee_id ?? null,
         }));
 
-      // ✅ de-duplicate (if someone added themselves)
+      // ✅ remove duplicates
       const seen = new Set<string>();
       const people = [mainPerson, ...others].filter((p: any) => {
         const id = String(p.user_id || "");
@@ -104,21 +105,19 @@ export async function GET() {
       return {
         id: s.id,
         created_at: s.created_at,
+        people,
 
-        // legacy fields
+        // legacy fallback fields (not really used by UI)
         full_name: mainPerson.full_name,
         phone: mainPerson.phone,
         email: mainPerson.email,
 
-        // ✅ IMPORTANT for UI
-        people,
-
         game_name: s?.games?.name ?? null,
-        players: s.players ?? (people?.length ?? null),
+        players: s.players ?? people.length ?? null, // ✅ keep correct
         slot_start: s.started_at ?? null,
         slot_end: s.ends_at ?? null,
-        status: s.status ?? null,
         exit_time: s.ended_at ?? null,
+        status: s.status ?? null,
       };
     });
 

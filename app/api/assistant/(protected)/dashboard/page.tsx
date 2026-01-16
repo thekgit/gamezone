@@ -16,16 +16,18 @@ type Row = {
   id: string;
   created_at: string;
 
-  full_name?: string | null;
-  phone?: string | null;
-  email?: string | null;
-
   people?: RowPerson[];
+
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
 
   game_name: string | null;
   players: number | null;
+
   slot_start: string | null;
   slot_end: string | null;
+
   status: string | null;
   exit_time: string | null;
 };
@@ -42,27 +44,21 @@ function dt(iso?: string | null) {
   if (!iso) return "-";
   return new Date(iso).toLocaleString();
 }
+
 function t(iso?: string | null) {
   if (!iso) return "-";
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function personLine(p: RowPerson) {
-  const name = p.full_name || "-";
-  const emp = p.employee_id ? ` • ${p.employee_id}` : "";
-  return `${name}${emp}`;
-}
-
-export default function AssistantDashboardClient() {
+export default function AssistantDashboard() {
   const router = useRouter();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
 
-  // ✅ IMPORTANT CHANGE: store QRs as a map to prevent duplicates forever
-  const [activeQr, setActiveQr] = useState<QrItem | null>(null);
-
-  // generating lock per session
+  // ✅ single fixed QR preview (NO stacking)
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrItem, setQrItem] = useState<QrItem | null>(null);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
   const [endTarget, setEndTarget] = useState<Row | null>(null);
@@ -76,14 +72,13 @@ export default function AssistantDashboardClient() {
         cache: "no-store",
         credentials: "include",
       });
-      const data = await res.json().catch(() => ({}));
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (res.status === 401) router.replace("/assistant/login");
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
-
       setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
@@ -97,7 +92,6 @@ export default function AssistantDashboardClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ remove QR for sessions that completed
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
@@ -107,18 +101,17 @@ export default function AssistantDashboardClient() {
     return m;
   }, [rows]);
 
+  // ✅ if session ended, close QR modal if it was for that session
   useEffect(() => {
-    if (!activeQr) return;
-    if (completedMap.get(activeQr.session_id)) {
-      setActiveQr(null);
+    if (!qrItem) return;
+    if (completedMap.get(qrItem.session_id)) {
+      setQrOpen(false);
+      setQrItem(null);
     }
-  }, [completedMap, activeQr]);
+  }, [completedMap, qrItem]);
 
   const genQr = async (r: Row) => {
     const session_id = r.id;
-
-    // ✅ HARD BLOCK: prevent multi-click spamming from creating multiple QRs
-    if (generating[session_id]) return;
 
     setMsg("");
     setGenerating((g) => ({ ...g, [session_id]: true }));
@@ -143,17 +136,20 @@ export default function AssistantDashboardClient() {
         return;
       }
 
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      const dataUrl = await QRCode.toDataURL(exit_url, { width: 260, margin: 1 });
 
-      // ✅ Label: show all people names like admin
-      const people = Array.isArray(r.people) ? r.people : [];
-      const peopleLabel =
-        people.length > 0
-          ? people.map(personLine).join(" | ")
-          : (r.full_name || "Guest");
+      // ✅ build label like admin
+      const mainName =
+        Array.isArray(r.people) && r.people.length > 0
+          ? r.people
+              .map((p) =>
+                [p.full_name || "-", p.employee_id ? `• ${p.employee_id}` : ""].filter(Boolean).join(" ")
+              )
+              .join(" | ")
+          : r.full_name || "Guest";
 
       const label = [
-        peopleLabel,
+        mainName,
         r.game_name ? `• ${r.game_name}` : "",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
@@ -169,8 +165,9 @@ export default function AssistantDashboardClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      // ✅ overwrite by session_id (NEVER duplicates)
-      setActiveQr(item);
+      // ✅ fixed place: update single QR modal
+      setQrItem(item);
+      setQrOpen(true);
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
@@ -194,8 +191,6 @@ export default function AssistantDashboardClient() {
         setEndErr(data?.error || "Failed to end session");
         return false;
       }
-
-      // after end, reload to remove it from list
       return true;
     } catch (e: any) {
       setEndErr(e?.message || "Failed to end session");
@@ -213,43 +208,47 @@ export default function AssistantDashboardClient() {
     }
   };
 
-
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
       <div className="mx-auto w-full max-w-6xl space-y-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">Active sessions only • End + Generate QR</p>
+            <p className="text-white/60 text-sm">Active sessions view (same details like Admin)</p>
           </div>
-          <button
-            onClick={logout}
-            className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500"
-          >
+
+          <button onClick={logout} className="rounded-xl bg-red-600 px-4 py-2 font-semibold hover:bg-red-500">
             Logout
           </button>
         </div>
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* ✅ QR PANEL */}
-        {activeQr && (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="font-semibold mb-2">Exit QR</div>
+        {/* ✅ FIXED QR MODAL (single place) */}
+        {qrOpen && qrItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-lg font-semibold">Exit QR</div>
+                  <div className="text-xs text-white/60 mt-1 break-words">{qrItem.label}</div>
+                  <div className="text-xs text-white/40 mt-1">Generated: {qrItem.generatedAt}</div>
+                </div>
+                <button onClick={() => setQrOpen(false)} className="text-white/70 hover:text-white">
+                  ✕
+                </button>
+              </div>
 
-            <div className="text-sm font-semibold">{activeQr.label}</div>
-            <div className="text-xs text-white/50 mt-1">Generated: {activeQr.generatedAt}</div>
+              <div className="mt-4 flex justify-center">
+                <img src={qrItem.dataUrl} alt="Exit QR" className="rounded-xl border border-white/10" />
+              </div>
 
-            <div className="mt-3 flex justify-center">
-              <img src={activeQr.dataUrl} alt="Exit QR" className="rounded-lg" />
-            </div>
-
-            <div className="mt-2 text-xs text-white/40 break-all">
-              Session: {activeQr.session_id}
+              <div className="mt-3 text-xs text-white/40 break-all">Session: {qrItem.session_id}</div>
             </div>
           </div>
         )}
 
+        {/* TABLE */}
         <div className="overflow-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
           <table className="w-full text-sm">
             <thead className="bg-white/5 text-white/70">
@@ -261,6 +260,7 @@ export default function AssistantDashboardClient() {
                 <th className="p-3 text-left">Game</th>
                 <th className="p-3 text-left">Players</th>
                 <th className="p-3 text-left">Slot</th>
+                <th className="p-3 text-left">Exit Time</th>
                 <th className="p-3 text-left">End Session</th>
                 <th className="p-3 text-left">QR</th>
               </tr>
@@ -274,12 +274,12 @@ export default function AssistantDashboardClient() {
                   <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                     <td className="p-3">{dt(r.created_at)}</td>
 
-                    {/* NAME */}
+                    {/* ✅ Name list */}
                     <td className="p-3">
                       {Array.isArray(r.people) && r.people.length > 0 ? (
                         <div className="space-y-2">
                           {r.people.map((p, idx) => (
-                            <div key={(p.user_id || "") + "_" + idx} className="leading-snug">
+                            <div key={(p.user_id || "") + "_n_" + idx} className="leading-snug">
                               <div className="font-semibold">
                                 {p.full_name || "-"}
                                 {p.employee_id ? (
@@ -294,7 +294,7 @@ export default function AssistantDashboardClient() {
                       )}
                     </td>
 
-                    {/* PHONE */}
+                    {/* ✅ Phone list */}
                     <td className="p-3">
                       {Array.isArray(r.people) && r.people.length > 0 ? (
                         <div className="space-y-2">
@@ -305,28 +305,32 @@ export default function AssistantDashboardClient() {
                           ))}
                         </div>
                       ) : (
-                        "-"
+                        r.phone || "-"
                       )}
                     </td>
 
-                    {/* EMAIL */}
+                    {/* ✅ Email list */}
                     <td className="p-3">
                       {Array.isArray(r.people) && r.people.length > 0 ? (
                         <div className="space-y-2">
                           {r.people.map((p, idx) => (
-                            <div key={(p.user_id || "") + "_em_" + idx} className="text-white/80 break-all">
+                            <div
+                              key={(p.user_id || "") + "_em_" + idx}
+                              className="text-white/80 break-all"
+                            >
                               {p.email || "-"}
                             </div>
                           ))}
                         </div>
                       ) : (
-                        "-"
+                        r.email || "-"
                       )}
                     </td>
 
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? (r.people?.length ?? "-")}</td>
                     <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
+                    <td className="p-3">{t(r.exit_time)}</td>
 
                     <td className="p-3">
                       {completed ? (
@@ -336,7 +340,7 @@ export default function AssistantDashboardClient() {
                           onClick={() => setEndTarget(r)}
                           className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
                         >
-                          End
+                          End Session
                         </button>
                       )}
                     </td>
@@ -360,7 +364,7 @@ export default function AssistantDashboardClient() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td className="p-4 text-white/60" colSpan={9}>
+                  <td className="p-4 text-white/60" colSpan={10}>
                     No active sessions found.
                   </td>
                 </tr>
