@@ -4,7 +4,7 @@ import { assertAdmin } from "@/lib/assertAdmin";
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { id } = await ctx.params;
     const body = await req.json().catch(() => ({}));

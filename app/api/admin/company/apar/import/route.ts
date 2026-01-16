@@ -30,7 +30,7 @@ function normName(v: any) {
 
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) {
+    if (!(await assertAdmin())) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

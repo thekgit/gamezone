@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 export async function POST(req: Request) {
   try {
-    if (!assertAssistant()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!(await assertAssistant())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();

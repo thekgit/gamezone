@@ -22,7 +22,7 @@ function normName(v: any) {
 
 export async function POST(req: Request) {
   try {
-    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
 

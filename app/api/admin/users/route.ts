@@ -8,7 +8,7 @@ export const revalidate = 0;
 // ---------- GET (LIST) ----------
 export async function GET() {
   try {
-    if (!assertAdmin()) {
+    if (!(await assertAdmin())) {
       return NextResponse.json({ error: "Unauthorized", users: [] }, { status: 401 });
     }
 
@@ -45,7 +45,7 @@ export async function GET() {
 
 // ---------- UPDATE helper ----------
 async function updateUser(body: any) {
-  if (!assertAdmin()) {
+  if (!(await assertAdmin())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
