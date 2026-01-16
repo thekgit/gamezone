@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 export default function AssistantLoginPage() {
   const router = useRouter();
@@ -17,6 +17,7 @@ export default function AssistantLoginPage() {
       const res = await fetch("/api/assistant/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ assistantId, password }),
       });
 
@@ -36,8 +37,8 @@ export default function AssistantLoginPage() {
     <main className="min-h-screen bg-black text-white flex items-center justify-center px-4">
       <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-6">
         <h1 className="text-2xl font-bold text-center">Assistant Admin Login</h1>
-        <p className="text-white/60 text-sm mt-1 text-center">
-          Limited access panel (Visitors only).
+        <p className="text-white/60 text-sm text-center mt-1">
+          Limited access panel (Sessions only)
         </p>
 
         <div className="mt-5 space-y-3">

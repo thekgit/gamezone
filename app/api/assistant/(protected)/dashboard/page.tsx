@@ -7,17 +7,10 @@ import { useRouter } from "next/navigation";
 type Row = {
   id: string;
   created_at: string;
-
-  full_name: string | null;
-  phone: string | null;
-  email: string | null;
-
   game_name: string | null;
   players: number | null;
-
   slot_start: string | null;
   slot_end: string | null;
-
   status: string | null;
   exit_time: string | null;
 };
@@ -39,7 +32,7 @@ function t(iso?: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function AssistantVisitorsClient() {
+export default function AssistantDashboard() {
   const router = useRouter();
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -55,19 +48,18 @@ export default function AssistantVisitorsClient() {
   const load = async () => {
     setMsg("");
     try {
-      const res = await fetch("/api/assistant/visitors", { cache: "no-store", credentials: "include" });
+      const res = await fetch("/api/assistant/visitors", {
+        cache: "no-store",
+        credentials: "include",
+      });
+
       const data = await res.json().catch(() => ({}));
-
-      if (res.status === 401) {
-        router.replace("/assistant/login");
-        return;
-      }
-
       if (!res.ok) {
+        // if unauthorized -> go login
+        if (res.status === 401) router.replace("/assistant/login");
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
-
       setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
@@ -78,7 +70,6 @@ export default function AssistantVisitorsClient() {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const completedMap = useMemo(() => {
@@ -96,7 +87,6 @@ export default function AssistantVisitorsClient() {
 
   const genQr = async (r: Row) => {
     const session_id = r.id;
-
     setMsg("");
     setGenerating((g) => ({ ...g, [session_id]: true }));
 
@@ -118,8 +108,7 @@ export default function AssistantVisitorsClient() {
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
       const label = [
-        r.full_name || "Guest",
-        r.game_name ? `• ${r.game_name}` : "",
+        r.game_name ? r.game_name : "Game",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
       ]
@@ -134,10 +123,10 @@ export default function AssistantVisitorsClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      // Keep generating new QRs each click (same as your old behavior)
-      setQrs((prev) => [item, ...prev]);
-    } catch (e: any) {
-      setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
+      setQrs((prev) => {
+        const withoutThis = prev.filter((x) => x.session_id !== session_id);
+        return [item, ...withoutThis];
+      });
     } finally {
       setGenerating((g) => ({ ...g, [session_id]: false }));
     }
@@ -169,18 +158,23 @@ export default function AssistantVisitorsClient() {
   };
 
   const logout = async () => {
-    await fetch("/api/assistant/auth/logout", { method: "POST" }).catch(() => {});
-    router.replace("/assistant/login");
+    try {
+      await fetch("/api/assistant/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
+      router.replace("/assistant/login");
+    }
   };
 
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
-      {/* Tablet optimized container */}
-      <div className="mx-auto w-full max-w-4xl space-y-5">
-        <div className="flex items-center justify-between gap-3">
+      {/* tablet friendly container */}
+      <div className="mx-auto w-full max-w-5xl space-y-6">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">Visitors (Active only) • Limited access</p>
+            <p className="text-white/60 text-sm">
+              Active sessions only • No visitor personal details shown
+            </p>
           </div>
           <button
             onClick={logout}
@@ -192,31 +186,30 @@ export default function AssistantVisitorsClient() {
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* QR panel */}
+        {/* QR PANEL */}
         {qrs.length > 0 && (
           <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="font-semibold mb-3">Generated Exit QRs</div>
+            <div className="font-semibold mb-3">Active Exit QRs</div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {qrs.slice(0, 9).map((q, idx) => (
-                <div key={`${q.session_id}-${q.generatedAt}-${idx}`} className="rounded-xl border border-white/10 bg-black/30 p-3">
+              {qrs.map((q) => (
+                <div key={q.session_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
                   <div className="text-sm font-semibold">{q.label}</div>
                   <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
                   <div className="mt-3 flex justify-center">
                     <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
                   </div>
+                  <div className="mt-2 text-xs text-white/40 break-all">Session: {q.session_id}</div>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Table */}
         <div className="overflow-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
-          <table className="w-full text-sm min-w-[900px]">
+          <table className="w-full text-sm">
             <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Timestamp</th>
-                <th className="p-3 text-left">Name</th>
                 <th className="p-3 text-left">Game</th>
                 <th className="p-3 text-left">Players</th>
                 <th className="p-3 text-left">Slot</th>
@@ -224,33 +217,43 @@ export default function AssistantVisitorsClient() {
                 <th className="p-3 text-left">QR</th>
               </tr>
             </thead>
+
             <tbody>
               {rows.map((r) => {
+                const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+
                 return (
                   <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                     <td className="p-3">{dt(r.created_at)}</td>
-                    <td className="p-3">{r.full_name || "Guest"}</td>
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
                     <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
 
                     <td className="p-3">
-                      <button
-                        onClick={() => setEndTarget(r)}
-                        className="rounded-xl bg-white/10 px-4 py-2 font-semibold hover:bg-white/15"
-                      >
-                        End
-                      </button>
+                      {completed ? (
+                        <span className="text-green-400 font-semibold">Completed</span>
+                      ) : (
+                        <button
+                          onClick={() => setEndTarget(r)}
+                          className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
+                        >
+                          End Session
+                        </button>
+                      )}
                     </td>
 
                     <td className="p-3">
-                      <button
-                        onClick={() => genQr(r)}
-                        disabled={!!generating[r.id]}
-                        className="rounded-xl bg-blue-600 px-4 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
-                      >
-                        {generating[r.id] ? "Generating..." : "Generate QR"}
-                      </button>
+                      {completed ? (
+                        <span className="text-green-400 font-semibold">Ended</span>
+                      ) : (
+                        <button
+                          onClick={() => genQr(r)}
+                          disabled={!!generating[r.id]}
+                          className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
+                        >
+                          {generating[r.id] ? "Generating..." : "Generate QR"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -258,7 +261,7 @@ export default function AssistantVisitorsClient() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td className="p-4 text-white/60" colSpan={7}>
+                  <td className="p-4 text-white/60" colSpan={6}>
                     No active sessions found.
                   </td>
                 </tr>
@@ -275,7 +278,7 @@ export default function AssistantVisitorsClient() {
                 <div>
                   <div className="text-lg font-semibold">End this session?</div>
                   <div className="text-sm text-white/60 mt-1">
-                    This will mark session as ended and it will disappear from Assistant view.
+                    If slot time passed, end time will be slot end. Otherwise it will be now.
                   </div>
                 </div>
                 <button onClick={() => setEndTarget(null)}>✕</button>

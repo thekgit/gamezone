@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    if (!(await assertAdmin())) {
+    if (!assertAdmin()) {
       return NextResponse.json({ error: "Unauthorized", users: [] }, { status: 401 });
     }
 

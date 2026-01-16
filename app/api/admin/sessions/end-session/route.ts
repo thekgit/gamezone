@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 export async function POST(req: Request) {
   try {
-    if (!(await assertAdmin())) {
+    if (!assertAdmin()) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

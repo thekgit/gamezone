@@ -4,7 +4,7 @@ import { assertAdmin } from "@/lib/assertAdmin";
 
 export async function POST(req: Request) {
   try {
-    if (!(await assertAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!assertAdmin()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const offer_date = String(body?.offer_date || "").trim();

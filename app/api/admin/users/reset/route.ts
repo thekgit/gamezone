@@ -5,6 +5,7 @@ import { assertAdmin } from "@/lib/assertAdmin";
 export async function POST(req: Request) {
   try {
     if (!assertAdmin()) return NextResponse.json({}, { status: 401 });
+
     const { user_id } = await req.json();
     const admin = supabaseAdmin();
 
