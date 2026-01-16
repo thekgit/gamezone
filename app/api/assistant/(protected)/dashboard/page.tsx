@@ -22,6 +22,11 @@ type Row = {
   slot_end: string | null;
   status: string | null;
   exit_time: string | null;
+
+  // backward compat (just in case)
+  full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
 };
 
 type QrItem = {
@@ -41,7 +46,29 @@ function t(iso?: string | null) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function AssistantDashboard() {
+function renderPeopleCell(people?: Person[]) {
+  const list = Array.isArray(people) ? people : [];
+  if (list.length === 0) return <div className="text-white/60">-</div>;
+
+  return (
+    <div className="space-y-1">
+      {list.map((p, idx) => {
+        const nameLine =
+          (p.full_name || "Guest") + (p.employee_id ? ` • ${p.employee_id}` : "");
+        return (
+          <div key={(p.user_id || "x") + "-" + idx} className="leading-5">
+            <div className="font-semibold">{nameLine}</div>
+            <div className="text-xs text-white/60">
+              {p.phone || "-"} • {p.email || "-"}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function AssistantDashboardClient() {
   const router = useRouter();
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -68,6 +95,7 @@ export default function AssistantDashboard() {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
+
       setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
@@ -116,7 +144,8 @@ export default function AssistantDashboard() {
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
       const label = [
-        r.game_name ? r.game_name : "Game",
+        (r.people?.[0]?.full_name || r.full_name || "Guest"),
+        r.game_name ? `• ${r.game_name}` : "",
         r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
         typeof r.players === "number" ? `• Players: ${r.players}` : "",
       ]
@@ -214,9 +243,7 @@ export default function AssistantDashboard() {
             <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Timestamp</th>
-                <th className="p-3 text-left">Name</th>
-                <th className="p-3 text-left">Phone</th>
-                <th className="p-3 text-left">Email</th>
+                <th className="p-3 text-left">People</th>
                 <th className="p-3 text-left">Game</th>
                 <th className="p-3 text-left">Players</th>
                 <th className="p-3 text-left">Slot</th>
@@ -228,65 +255,14 @@ export default function AssistantDashboard() {
             <tbody>
               {rows.map((r) => {
                 const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
-                const people = Array.isArray(r.people) ? r.people : [];
 
                 return (
                   <tr key={r.id} className="border-t border-white/10 hover:bg-white/5 align-top">
                     <td className="p-3">{dt(r.created_at)}</td>
-
-                    {/* Name stack */}
-                    <td className="p-3">
-                      {people.length === 0 ? (
-                        <div className="text-white/60">-</div>
-                      ) : (
-                        <div className="space-y-1">
-                          {people.map((p, idx) => (
-                            <div key={idx} className="leading-snug">
-                              <div className="font-semibold">
-                                {(p.full_name || "-")}
-                                {p.employee_id ? ` • ${p.employee_id}` : ""}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Phone stack */}
-                    <td className="p-3">
-                      {people.length === 0 ? (
-                        <div className="text-white/60">-</div>
-                      ) : (
-                        <div className="space-y-1">
-                          {people.map((p, idx) => (
-                            <div key={idx} className="text-white/80">
-                              {p.phone || "-"}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Email stack */}
-                    <td className="p-3">
-                      {people.length === 0 ? (
-                        <div className="text-white/60">-</div>
-                      ) : (
-                        <div className="space-y-1">
-                          {people.map((p, idx) => (
-                            <div key={idx} className="text-white/80 break-all">
-                              {p.email || "-"}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-
+                    <td className="p-3">{renderPeopleCell(r.people)}</td>
                     <td className="p-3">{r.game_name || "-"}</td>
                     <td className="p-3">{r.players ?? "-"}</td>
-                    <td className="p-3">
-                      {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
-                    </td>
+                    <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
 
                     <td className="p-3">
                       {completed ? (
@@ -320,7 +296,7 @@ export default function AssistantDashboard() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td className="p-4 text-white/60" colSpan={9}>
+                  <td className="p-4 text-white/60" colSpan={7}>
                     No active sessions found.
                   </td>
                 </tr>
