@@ -14,6 +14,24 @@ export async function GET() {
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
+    // ✅ Logic:
+    // ended_at is null
+    // AND (status is active OR status is null)
+    // AND (ends_at is null OR ends_at > now)
+    //
+    // We express (status...) AND (ends_at...) using OR of AND-groups:
+    // (status=active AND ends_at is null)
+    // OR (status=active AND ends_at > now)
+    // OR (status is null AND ends_at is null)
+    // OR (status is null AND ends_at > now)
+
+    const OR = [
+      `and(status.eq.active,ends_at.is.null)`,
+      `and(status.eq.active,ends_at.gt.${nowIso})`,
+      `and(status.is.null,ends_at.is.null)`,
+      `and(status.is.null,ends_at.gt.${nowIso})`,
+    ].join(",");
+
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -29,8 +47,7 @@ export async function GET() {
       `
       )
       .is("ended_at", null)
-      .or("status.eq.active,status.is.null")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
+      .or(OR)
       .order("created_at", { ascending: false })
       .limit(5000);
 

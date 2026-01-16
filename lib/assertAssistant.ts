@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 
 export async function assertAssistant() {
-  const store = await cookies(); // ✅ Next.js 16: cookies() is async
-  const c = store.get("assistant_auth")?.value;
-  return c === "1";
+  const jar = await cookies(); // ✅ cookies() is async in Next 16
+  const v = jar.get("assistant_auth")?.value;
+  return v === "1";
 }
