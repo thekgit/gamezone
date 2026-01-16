@@ -13,6 +13,11 @@ type Person = {
   employee_id: string | null;
 };
 
+function isGuestName(v: any) {
+  const s = String(v || "").trim().toLowerCase();
+  return !s || s === "guest" || s === "-" || s === "null";
+}
+
 export async function GET() {
   try {
     if (!(await assertAssistant())) {
@@ -22,7 +27,6 @@ export async function GET() {
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // ✅ include user_id + player_user_ids + visitor fields so we can build people[]
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -48,13 +52,11 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(5000);
 
-    if (error) {
-      return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
-    }
+    if (error) return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
 
     const sessionRows = (data || []) as any[];
 
-    // ✅ collect all ids we need (owner + added players)
+    // Collect all user IDs (owner + added players)
     const idsToFetch = new Set<string>();
     for (const s of sessionRows) {
       if (s.user_id) idsToFetch.add(String(s.user_id));
@@ -64,7 +66,7 @@ export async function GET() {
 
     const idList = Array.from(idsToFetch);
 
-    // ✅ pull profiles for all involved users
+    // Fetch profiles for all IDs
     const profilesMap = new Map<string, any>();
     if (idList.length > 0) {
       const { data: profs, error: pErr } = await admin
@@ -72,29 +74,39 @@ export async function GET() {
         .select("user_id, full_name, phone, email, employee_id")
         .in("user_id", idList);
 
-      if (pErr) {
-        return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
-      }
+      if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
 
-      for (const p of profs || []) {
-        profilesMap.set(String(p.user_id), p);
-      }
+      for (const p of profs || []) profilesMap.set(String(p.user_id), p);
     }
 
     const rows = sessionRows.map((s: any) => {
       const mainId = s.user_id ? String(s.user_id) : "";
       const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-      // ✅ main person: prefer stored visitor_* (works even if profile is missing)
+      // ✅ IMPORTANT FIX:
+      // if DB stored visitor_name as "Guest", we replace it with profile full_name
+      const mainFullName = isGuestName(s.visitor_name)
+        ? (mainProfile?.full_name ?? s.visitor_name ?? null)
+        : (s.visitor_name ?? mainProfile?.full_name ?? null);
+
+      const mainPhone =
+        (s.visitor_phone ?? null) ||
+        (mainProfile?.phone ?? null) ||
+        null;
+
+      const mainEmail =
+        (s.visitor_email ?? null) ||
+        (mainProfile?.email ?? null) ||
+        null;
+
       const mainPerson: Person = {
         user_id: mainId || null,
-        full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
-        phone: s.visitor_phone ?? mainProfile?.phone ?? null,
-        email: s.visitor_email ?? mainProfile?.email ?? null,
+        full_name: mainFullName,
+        phone: mainPhone,
+        email: mainEmail,
         employee_id: mainProfile?.employee_id ?? null,
       };
 
-      // ✅ other players: use profiles
       const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
       const others: Person[] = otherIds
         .map((pid: any) => profilesMap.get(String(pid)))
@@ -107,8 +119,6 @@ export async function GET() {
           employee_id: p.employee_id ?? null,
         }));
 
-      const people = [mainPerson, ...others];
-
       return {
         id: s.id,
         created_at: s.created_at,
@@ -118,7 +128,7 @@ export async function GET() {
         slot_end: s.ends_at ?? null,
         status: s.status ?? null,
         exit_time: s.ended_at ?? null,
-        people, // ✅ this fixes "Guest"
+        people: [mainPerson, ...others],
       };
     });
 
