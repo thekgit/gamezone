@@ -6,18 +6,19 @@ import { assertAssistant } from "@/lib/assertAssistant";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function mkToken(len = 16) {
-  return crypto.randomBytes(len).toString("hex");
+function base64url(input: Buffer | string) {
+  const b = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  return b
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
 }
 
-function originFromReq(req: Request) {
-  // Works on Vercel + local
-  const h = req.headers;
-  const proto = h.get("x-forwarded-proto") || "https";
-  const host = h.get("x-forwarded-host") || h.get("host");
-  if (host) return `${proto}://${host}`;
-  // fallback
-  return "https://k-e18b.vercel.app";
+function signToken(payload: any, secret: string) {
+  const body = base64url(JSON.stringify(payload));
+  const sig = base64url(crypto.createHmac("sha256", secret).update(body).digest());
+  return `${body}.${sig}`;
 }
 
 export async function POST(req: Request) {
@@ -28,39 +29,56 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();
-    if (!session_id) return NextResponse.json({ error: "session_id required" }, { status: 400 });
-
-    const admin = supabaseAdmin();
-
-    // 1) read existing token
-    const { data: sess, error: sErr } = await admin
-      .from("sessions")
-      .select("id, exit_token")
-      .eq("id", session_id)
-      .maybeSingle();
-
-    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
-    if (!sess?.id) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-
-    let exit_token = String(sess.exit_token || "").trim();
-
-    // 2) ensure token exists
-    if (!exit_token) {
-      exit_token = mkToken(16);
-      const { error: uErr } = await admin
-        .from("sessions")
-        .update({ exit_token })
-        .eq("id", session_id);
-
-      if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 });
+    if (!session_id) {
+      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
     }
 
-    const base = originFromReq(req);
-    const exit_url = `${base}/exit?session_id=${encodeURIComponent(session_id)}&token=${encodeURIComponent(
-      exit_token
-    )}`;
+    const secret = process.env.EXIT_QR_SECRET;
+    if (!secret) {
+      return NextResponse.json({ error: "Missing EXIT_QR_SECRET in env" }, { status: 500 });
+    }
 
-    return NextResponse.json({ ok: true, exit_url }, { status: 200 });
+    const base =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "";
+    if (!base) {
+      return NextResponse.json(
+        { error: "Missing NEXT_PUBLIC_SITE_URL (or NEXT_PUBLIC_APP_URL) in env" },
+        { status: 500 }
+      );
+    }
+
+    // optional safety: don’t generate for ended sessions
+    const admin = supabaseAdmin();
+    const { data: s, error: sErr } = await admin
+      .from("sessions")
+      .select("id, ended_at, status")
+      .eq("id", session_id)
+      .single();
+
+    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+
+    const ended = !!s.ended_at || String(s.status || "").toLowerCase() === "ended";
+    if (ended) {
+      return NextResponse.json({ error: "Session already ended" }, { status: 400 });
+    }
+
+    // new random token every click -> new QR every time
+    const tokenPayload = {
+      sid: session_id,
+      nonce: crypto.randomBytes(16).toString("hex"),
+      exp: Date.now() + 1000 * 60 * 30,
+    };
+
+    const token = signToken(tokenPayload, secret);
+
+    const exit_url =
+      `${base.replace(/\/$/, "")}/exit?session_id=${encodeURIComponent(session_id)}` +
+      `&token=${encodeURIComponent(token)}`;
+
+    return NextResponse.json({ exit_url }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
   }

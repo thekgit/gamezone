@@ -229,10 +229,12 @@ export default function AssistantDashboardClient() {
 
         <div className="overflow-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
           <table className="w-full text-sm">
-            <thead className="bg-white/5 text-white/70">
+          <thead className="bg-white/5 text-white/70">
               <tr>
                 <th className="p-3 text-left">Timestamp</th>
-                <th className="p-3 text-left">People</th>
+                <th className="p-3 text-left">Name</th>
+                <th className="p-3 text-left">Phone</th>
+                <th className="p-3 text-left">Email</th>
                 <th className="p-3 text-left">Game</th>
                 <th className="p-3 text-left">Players</th>
                 <th className="p-3 text-left">Slot</th>
@@ -246,34 +248,61 @@ export default function AssistantDashboardClient() {
                 const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
 
                 return (
-                  <tr key={r.id} className="border-t border-white/10 hover:bg-white/5 align-top">
+                  <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                     <td className="p-3">{dt(r.created_at)}</td>
 
-                    {/* ✅ EXACT admin-like people rendering */}
+                    {/* NAME */}
                     <td className="p-3">
                       {Array.isArray(r.people) && r.people.length > 0 ? (
                         <div className="space-y-2">
                           {r.people.map((p, idx) => (
-                            <div key={(p.user_id || "x") + "_" + idx} className="leading-snug">
+                            <div key={(p.user_id || "") + "_" + idx} className="leading-snug">
                               <div className="font-semibold">
                                 {p.full_name || "-"}
                                 {p.employee_id ? (
                                   <span className="text-white/50 font-normal"> • {p.employee_id}</span>
                                 ) : null}
                               </div>
-                              <div className="text-white/70 text-xs break-all">
-                                {(p.phone || "-")} • {(p.email || "-")}
-                              </div>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <div className="text-white/60">-</div>
+                        r.full_name || "Guest"
+                      )}
+                    </td>
+
+                    {/* PHONE */}
+                    <td className="p-3">
+                      {Array.isArray(r.people) && r.people.length > 0 ? (
+                        <div className="space-y-2">
+                          {r.people.map((p, idx) => (
+                            <div key={(p.user_id || "") + "_ph_" + idx} className="text-white/80">
+                              {p.phone || "-"}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        r.people?.[0]?.phone || "-"
+                      )}
+                    </td>
+
+                    {/* EMAIL */}
+                    <td className="p-3">
+                      {Array.isArray(r.people) && r.people.length > 0 ? (
+                        <div className="space-y-2">
+                          {r.people.map((p, idx) => (
+                            <div key={(p.user_id || "") + "_em_" + idx} className="text-white/80 break-all">
+                              {p.email || "-"}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        r.people?.[0]?.email || "-"
                       )}
                     </td>
 
                     <td className="p-3">{r.game_name || "-"}</td>
-                    <td className="p-3">{r.players ?? "-"}</td>
+                    <td className="p-3">{r.players ?? (r.people?.length ?? "-")}</td>
                     <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
 
                     <td className="p-3">
@@ -308,7 +337,7 @@ export default function AssistantDashboardClient() {
 
               {rows.length === 0 && (
                 <tr>
-                  <td className="p-4 text-white/60" colSpan={7}>
+                  <td className="p-4 text-white/60" colSpan={9}>
                     No active sessions found.
                   </td>
                 </tr>
