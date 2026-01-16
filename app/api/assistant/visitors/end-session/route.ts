@@ -7,7 +7,7 @@ export const revalidate = 0;
 
 export async function POST(req: Request) {
   try {
-    if (!assertAssistant()) {
+    if (!(await assertAssistant())) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -17,7 +17,6 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // ✅ sessions table in your DB has: ends_at, ended_at, status
     const { data: s, error: fetchErr } = await admin
       .from("sessions")
       .select("id, status, ends_at, ended_at")
@@ -27,7 +26,6 @@ export async function POST(req: Request) {
     if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
     if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    // idempotent
     const st = String(s.status || "").toLowerCase();
     if (s.ended_at || st === "ended" || st === "completed") {
       return NextResponse.json({ ok: true, ended_at: s.ended_at }, { status: 200 });
@@ -36,20 +34,14 @@ export async function POST(req: Request) {
     const now = new Date();
     let endAt = now;
 
-    // rule: if time already passed -> set ended_at = slot end, else now
     if (s.ends_at) {
       const slotEnd = new Date(String(s.ends_at));
-      if (!isNaN(slotEnd.getTime())) {
-        endAt = now > slotEnd ? slotEnd : now;
-      }
+      if (!isNaN(slotEnd.getTime())) endAt = now > slotEnd ? slotEnd : now;
     }
 
     const { error: updErr } = await admin
       .from("sessions")
-      .update({
-        ended_at: endAt.toISOString(),
-        status: "ended",
-      })
+      .update({ ended_at: endAt.toISOString(), status: "ended" })
       .eq("id", session_id);
 
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });

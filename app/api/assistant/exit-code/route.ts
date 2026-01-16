@@ -14,7 +14,9 @@ function originFromReq(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    if (!assertAssistant()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!(await assertAssistant())) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();
@@ -22,7 +24,6 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // IMPORTANT: your QR exit flow expects session_id + token
     const { data: s, error } = await admin
       .from("sessions")
       .select("id, exit_token, ended_at, status")
@@ -32,7 +33,6 @@ export async function POST(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    // don't generate QR for ended session
     const st = String(s.status || "").toLowerCase();
     if (s.ended_at || st === "ended" || st === "completed") {
       return NextResponse.json({ error: "Session already ended" }, { status: 409 });

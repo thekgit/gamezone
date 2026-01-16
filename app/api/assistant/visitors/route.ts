@@ -7,14 +7,13 @@ export const revalidate = 0;
 
 export async function GET() {
   try {
-    if (!assertAssistant()) {
+    if (!(await assertAssistant())) {
       return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // ✅ Assistant sees ONLY active sessions (ended sessions disappear)
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -31,13 +30,12 @@ export async function GET() {
       )
       .is("ended_at", null)
       .or("status.eq.active,status.is.null")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`) // keep "currently running" sessions
+      .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
       .order("created_at", { ascending: false })
       .limit(5000);
 
     if (error) return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
 
-    // ✅ No personal details returned
     const rows = (data || []).map((s: any) => ({
       id: s.id,
       created_at: s.created_at,
