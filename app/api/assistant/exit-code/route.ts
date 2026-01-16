@@ -23,25 +23,21 @@ function signToken(payload: any, secret: string) {
 
 export async function POST(req: Request) {
   try {
-    if (!(await assertAssistant())) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const ok = await assertAssistant();
+    if (!ok) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
     const session_id = String(body?.session_id || "").trim();
-    if (!session_id) {
-      return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
-    }
+    if (!session_id) return NextResponse.json({ error: "Missing session_id" }, { status: 400 });
 
     const secret = process.env.EXIT_QR_SECRET;
-    if (!secret) {
-      return NextResponse.json({ error: "Missing EXIT_QR_SECRET in env" }, { status: 500 });
-    }
+    if (!secret) return NextResponse.json({ error: "Missing EXIT_QR_SECRET in env" }, { status: 500 });
 
     const base =
       process.env.NEXT_PUBLIC_SITE_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
       "";
+
     if (!base) {
       return NextResponse.json(
         { error: "Missing NEXT_PUBLIC_SITE_URL (or NEXT_PUBLIC_APP_URL) in env" },
@@ -49,7 +45,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // optional safety: don’t generate for ended sessions
+    // block QR for already-ended sessions
     const admin = supabaseAdmin();
     const { data: s, error: sErr } = await admin
       .from("sessions")
@@ -61,11 +57,9 @@ export async function POST(req: Request) {
     if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
     const ended = !!s.ended_at || String(s.status || "").toLowerCase() === "ended";
-    if (ended) {
-      return NextResponse.json({ error: "Session already ended" }, { status: 400 });
-    }
+    if (ended) return NextResponse.json({ error: "Session already ended" }, { status: 400 });
 
-    // new random token every click -> new QR every time
+    // ✅ new QR each click (same as admin behavior)
     const tokenPayload = {
       sid: session_id,
       nonce: crypto.randomBytes(16).toString("hex"),

@@ -5,16 +5,25 @@ import { assertAssistant } from "@/lib/assertAssistant";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+type Person = {
+  user_id: string | null;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  employee_id: string | null;
+};
+
 export async function GET() {
   try {
-    if (!(await assertAssistant())) {
+    const ok = await assertAssistant();
+    if (!ok) {
       return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
     }
 
     const admin = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    // ✅ active only
+    // ✅ IMPORTANT: include user_id + player_user_ids + visitor_* fields
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -34,27 +43,31 @@ export async function GET() {
         games:game_id ( name )
       `
       )
+      // ✅ active-only behavior for assistant
       .is("ended_at", null)
       .or("status.eq.active,status.is.null")
       .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
       .order("created_at", { ascending: false })
       .limit(5000);
 
-    if (error) return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
+    }
 
     const sessionRows = (data || []) as any[];
 
-    // ✅ collect all ids (main + other players)
+    // ✅ collect ALL ids to resolve into profiles (main + other players)
     const idsToFetch = new Set<string>();
     for (const s of sessionRows) {
       if (s.user_id) idsToFetch.add(String(s.user_id));
       const arr = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
-      for (const pid of arr) if (pid) idsToFetch.add(String(pid));
+      for (const pid of arr) {
+        if (pid) idsToFetch.add(String(pid));
+      }
     }
 
     const idList = Array.from(idsToFetch);
 
-    // ✅ fetch profiles once
     const profilesMap = new Map<string, any>();
     if (idList.length > 0) {
       const { data: profRows, error: pErr } = await admin
@@ -62,16 +75,21 @@ export async function GET() {
         .select("user_id, full_name, phone, email, employee_id")
         .in("user_id", idList);
 
-      if (pErr) return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
-      for (const p of profRows || []) profilesMap.set(String(p.user_id), p);
+      if (pErr) {
+        return NextResponse.json({ error: pErr.message, rows: [] }, { status: 500 });
+      }
+
+      for (const p of profRows || []) {
+        profilesMap.set(String(p.user_id), p);
+      }
     }
 
     const rows = sessionRows.map((s: any) => {
       const mainId = s.user_id ? String(s.user_id) : "";
       const mainProfile = mainId ? profilesMap.get(mainId) : null;
 
-      // ✅ main person (prefer visitor_* -> profile)
-      const mainPerson = {
+      // ✅ main person: prefer visitor_* (what admin sees) then profiles fallback
+      const mainPerson: Person = {
         user_id: mainId || null,
         full_name: s.visitor_name ?? mainProfile?.full_name ?? null,
         phone: s.visitor_phone ?? mainProfile?.phone ?? null,
@@ -79,9 +97,9 @@ export async function GET() {
         employee_id: mainProfile?.employee_id ?? null,
       };
 
-      // ✅ others from player_user_ids
+      // ✅ other players from player_user_ids -> profiles
       const otherIds = Array.isArray(s.player_user_ids) ? s.player_user_ids : [];
-      const others = otherIds
+      const others: Person[] = otherIds
         .map((pid: any) => profilesMap.get(String(pid)))
         .filter(Boolean)
         .map((p: any) => ({
@@ -92,9 +110,9 @@ export async function GET() {
           employee_id: p.employee_id ?? null,
         }));
 
-      // ✅ remove duplicates
+      // ✅ de-duplicate people list
       const seen = new Set<string>();
-      const people = [mainPerson, ...others].filter((p: any) => {
+      const people = [mainPerson, ...others].filter((p) => {
         const id = String(p.user_id || "");
         if (!id) return true;
         if (seen.has(id)) return false;
@@ -105,19 +123,21 @@ export async function GET() {
       return {
         id: s.id,
         created_at: s.created_at,
-        people,
 
-        // legacy fallback fields (not really used by UI)
+        // legacy single fields (for labels)
         full_name: mainPerson.full_name,
         phone: mainPerson.phone,
         email: mainPerson.email,
 
+        // ✅ NEW for assistant UI: full people stack like admin
+        people,
+
         game_name: s?.games?.name ?? null,
-        players: s.players ?? people.length ?? null, // ✅ keep correct
+        players: s.players ?? null,
         slot_start: s.started_at ?? null,
         slot_end: s.ends_at ?? null,
-        exit_time: s.ended_at ?? null,
         status: s.status ?? null,
+        exit_time: s.ended_at ?? null,
       };
     });
 
