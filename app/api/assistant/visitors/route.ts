@@ -1,4 +1,3 @@
-// app/api/assistant/visitors/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { assertAssistant } from "@/lib/assertAssistant";
@@ -12,9 +11,9 @@ export async function GET() {
     if (!ok) return NextResponse.json({ error: "Unauthorized", rows: [] }, { status: 401 });
 
     const admin = supabaseAdmin();
-    const nowMs = Date.now();
 
-    // ✅ Fetch recent sessions (then filter safely in JS)
+    // ✅ ACTIVE = ended_at IS NULL (ONLY)
+    // ❌ NO ends_at filtering here
     const { data, error } = await admin
       .from("sessions")
       .select(
@@ -34,28 +33,17 @@ export async function GET() {
         games:game_id ( name )
       `
       )
+      .is("ended_at", null)
+      // keep these if you want, but ended_at is the real rule
+      .or("status.is.null,status.eq.active")
       .order("created_at", { ascending: false })
       .limit(5000);
 
     if (error) return NextResponse.json({ error: error.message, rows: [] }, { status: 500 });
 
-    // ✅ Assistant should see ACTIVE only (hard filter)
-    const sessionRows = (data || []).filter((s: any) => {
-      const st = String(s.status || "").toLowerCase();
-      const ended = !!s.ended_at || st === "ended" || st === "completed";
-      if (ended) return false;
+    const sessionRows = (data || []) as any[];
 
-      // if ends_at exists and already passed, consider not active for assistant
-      if (s.ends_at) {
-        const ends = new Date(String(s.ends_at)).getTime();
-        if (!Number.isNaN(ends) && ends <= nowMs) return false;
-      }
-
-      // otherwise active
-      return true;
-    });
-
-    // ✅ resolve people like admin
+    // ✅ resolve people exactly like admin
     const idsToFetch = new Set<string>();
     for (const s of sessionRows) {
       if (s.user_id) idsToFetch.add(String(s.user_id));
@@ -113,13 +101,10 @@ export async function GET() {
       return {
         id: s.id,
         created_at: s.created_at,
-
         full_name: mainPerson.full_name,
         phone: mainPerson.phone,
         email: mainPerson.email,
-
         people,
-
         game_name: s?.games?.name ?? null,
         players: s.players ?? null,
         slot_start: s.started_at ?? null,

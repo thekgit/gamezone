@@ -34,7 +34,7 @@ export async function GET() {
       .from("sessions")
       .select("game_id")
       .eq("status", "active")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+      .is("ended_at", null);
 
     if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
 

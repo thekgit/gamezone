@@ -26,7 +26,7 @@ export async function GET(req: Request) {
       .eq("user_id", user_id)
       .is("ended_at", null)
       .or("status.is.null,status.eq.active")
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
+      .is("ended_at", null)
       .order("started_at", { ascending: false })
       .limit(50);
 

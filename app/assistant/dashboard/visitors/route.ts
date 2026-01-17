@@ -39,7 +39,7 @@ export async function GET() {
       )
       .or("status.eq.active,status.is.null")
       .is("ended_at", null)
-      .or(`ends_at.is.null,ends_at.gt.${nowIso}`)
+      .is("ended_at", null)
       .order("created_at", { ascending: false })
       .limit(500);
 
