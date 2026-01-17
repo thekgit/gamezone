@@ -334,7 +334,6 @@ export default function AssistantVisitorsClient() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">Visitors (Active only) • Limited access</p>
           </div>
 
           <button
