@@ -19,28 +19,25 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // (optional safety) check session exists
+    // optional: ensure it exists
     const { data: s, error: fetchErr } = await admin
       .from("sessions")
-      .select("id, ended_at, status")
+      .select("id")
       .eq("id", session_id)
       .single();
 
     if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
     if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    // ✅ If already ended, just return ok (idempotent)
-    const st = String(s.status || "").toLowerCase();
-    if (s.ended_at || st === "ended" || st === "completed") {
-      return NextResponse.json({ ok: true, ended_at: s.ended_at }, { status: 200 });
-    }
-
-    // ✅ IMPORTANT: ALWAYS use click time (NOW)
+    // ✅ ALWAYS record click time (overwrite any previous ended_at)
     const nowIso = new Date().toISOString();
 
     const { error: updErr } = await admin
       .from("sessions")
-      .update({ ended_at: nowIso, status: "ended" })
+      .update({
+        ended_at: nowIso,
+        status: "ended",
+      })
       .eq("id", session_id);
 
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
