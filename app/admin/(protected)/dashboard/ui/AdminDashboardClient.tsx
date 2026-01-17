@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import AparUsersClient from "../../../(panel)/ui/AparUsersClient";
+
 type RowPerson = {
   user_id: string | null;
   full_name: string | null;
@@ -19,7 +20,7 @@ type Row = {
   phone: string | null;
   email: string | null;
 
-  people?: RowPerson[]; // ✅ NEW
+  people?: RowPerson[];
 
   game_name: string | null;
   players: number | null;
@@ -31,7 +32,6 @@ type Row = {
   exit_time: string | null;
 };
 
-
 type QrItem = {
   session_id: string;
   label: string;
@@ -40,35 +40,73 @@ type QrItem = {
   generatedAt: string;
 };
 
+function safeLower(v: any) {
+  return String(v ?? "").toLowerCase();
+}
 function dt(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleString();
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString();
 }
-
 function t(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function AdminDashboardClient() {
+  // ----------------------------
+  // Core data
+  // ----------------------------
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
 
+  // ----------------------------
+  // Search (NEW)
+  // ----------------------------
+  const [search, setSearch] = useState("");
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+
+    const hit = (v: any) => safeLower(v).includes(q);
+
+    return rows.filter((r) => {
+      // search in people[] first
+      if (Array.isArray(r.people) && r.people.length > 0) {
+        return r.people.some((p) => hit(p.full_name) || hit(p.employee_id) || hit(p.email) || hit(p.phone));
+      }
+      // fallback legacy fields
+      return hit(r.full_name) || hit(r.email) || hit(r.phone);
+    });
+  }, [rows, search]);
+
+  // ----------------------------
+  // QR state
+  // ----------------------------
   const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
+  // ----------------------------
+  // End session modal state
+  // ----------------------------
   const [endTarget, setEndTarget] = useState<Row | null>(null);
   const [ending, setEnding] = useState(false);
   const [endErr, setEndErr] = useState("");
 
-  // ✅ NEW: Delete popup state
+  // ----------------------------
+  // Delete modal state
+  // ----------------------------
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteErr, setDeleteErr] = useState("");
 
+  // ----------------------------
+  // Load data
+  // ----------------------------
   const load = async () => {
     setMsg("");
     try {
@@ -82,7 +120,9 @@ export default function AdminDashboardClient() {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
-      setRows((data.rows || []) as Row[]);
+
+      const next = (data.rows || []) as Row[];
+      setRows(next);
     } catch {
       setMsg("Failed to load");
     }
@@ -92,26 +132,57 @@ export default function AdminDashboardClient() {
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ----------------------------
+  // Derived maps
+  // ----------------------------
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const r of rows) {
-      const completed =
-        (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+      const completed = safeLower(r.status) === "ended" || !!r.exit_time;
       m.set(r.id, completed);
     }
     return m;
   }, [rows]);
 
+  // remove QR cards when session completes
   useEffect(() => {
     setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
-  // ✅ Generate QR (unchanged)
+  // ----------------------------
+  // Helpers
+  // ----------------------------
+  const buildLabel = (r: Row) => {
+    const namePart =
+      Array.isArray(r.people) && r.people.length > 0
+        ? r.people
+            .map((p) => {
+              const nm = p.full_name || "(No name)";
+              const emp = p.employee_id ? ` • ${p.employee_id}` : "";
+              return `${nm}${emp}`;
+            })
+            .join(" | ")
+        : r.full_name || "(No name)";
+
+    return [
+      namePart,
+      r.email ? `• ${r.email}` : "",
+      r.game_name ? `• ${r.game_name}` : "",
+      r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
+      typeof r.players === "number" ? `• Players: ${r.players}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  };
+
+  // ----------------------------
+  // Actions
+  // ----------------------------
   const genQr = async (r: Row) => {
     const session_id = r.id;
-
     setMsg("");
     setGenerating((g) => ({ ...g, [session_id]: true }));
 
@@ -124,7 +195,6 @@ export default function AdminDashboardClient() {
       });
 
       const data = await res.json().catch(() => ({}));
-
       if (!res.ok) {
         setMsg((data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`);
         return;
@@ -138,27 +208,18 @@ export default function AdminDashboardClient() {
 
       const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
-      const label = [
-        r.full_name || "(No name)",
-        r.email ? `• ${r.email}` : "",
-        r.game_name ? `• ${r.game_name}` : "",
-        r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
-        typeof r.players === "number" ? `• Players: ${r.players}` : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-
       const item: QrItem = {
         session_id,
-        label,
+        label: buildLabel(r),
         dataUrl,
         exit_url,
         generatedAt: new Date().toLocaleString(),
       };
 
+      // ✅ Replace QR for same session (prevents duplicates)
       setQrs((prev) => {
-        const withoutThis = prev.filter((x) => x.session_id !== session_id);
-        return [item, ...withoutThis];
+        const without = prev.filter((x) => x.session_id !== session_id);
+        return [item, ...without];
       });
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
@@ -167,18 +228,16 @@ export default function AdminDashboardClient() {
     }
   };
 
-  // ✅ End Session (your existing behavior)
   const endSession = async (r: Row) => {
     setEndErr("");
     setEnding(true);
+
     try {
       const res = await fetch("/api/admin/visitors/end-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          session_id: r.id,
-        }),
+        body: JSON.stringify({ session_id: r.id }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -186,6 +245,9 @@ export default function AdminDashboardClient() {
         setEndErr(data?.error || "Failed to end session");
         return false;
       }
+
+      // ✅ After success, refresh list + drop QR for this session
+      setQrs((prev) => prev.filter((q) => q.session_id !== r.id));
       return true;
     } catch (e: any) {
       setEndErr(e?.message || "Failed to end session");
@@ -195,10 +257,10 @@ export default function AdminDashboardClient() {
     }
   };
 
-  // ✅ NEW: Delete Entry (ONLY sessions row)
   const deleteEntry = async (r: Row) => {
     setDeleteErr("");
     setDeleting(true);
+
     try {
       const res = await fetch("/api/admin/visitors/delete-entry", {
         method: "POST",
@@ -212,6 +274,10 @@ export default function AdminDashboardClient() {
         setDeleteErr(data?.error || "Failed to delete entry");
         return false;
       }
+
+      // ✅ immediate UI cleanup
+      setRows((prev) => prev.filter((x) => x.id !== r.id));
+      setQrs((prev) => prev.filter((q) => q.session_id !== r.id));
       return true;
     } catch (e: any) {
       setDeleteErr(e?.message || "Failed to delete entry");
@@ -221,42 +287,46 @@ export default function AdminDashboardClient() {
     }
   };
 
+  // ----------------------------
+  // Render
+  // ----------------------------
   return (
     <div className="text-white space-y-6">
       <AparUsersClient />
 
       <div>
         <h1 className="text-2xl font-bold">Visitors</h1>
-        <p className="text-white/60 text-sm">
-          Active sessions timeline + Generate Exit QR.
-        </p>
+        <p className="text-white/60 text-sm">Active sessions timeline + Generate Exit QR.</p>
+      </div>
+
+      {/* Search bar */}
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name, employee id, email or phone..."
+          className="w-full rounded-lg bg-black/40 border border-white/10 px-4 py-2 text-white outline-none focus:border-white/30"
+        />
       </div>
 
       {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-      {/* ✅ QR PANEL (unchanged) */}
+      {/* QR PANEL */}
       {qrs.length > 0 && (
         <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="font-semibold mb-3">Active Exit QRs</div>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {qrs.map((q) => (
-              <div
-                key={q.session_id}
-                className="rounded-xl border border-white/10 bg-black/30 p-3"
-              >
+              <div key={q.session_id} className="rounded-xl border border-white/10 bg-black/30 p-3">
                 <div className="text-sm font-semibold">{q.label}</div>
-                <div className="text-xs text-white/50 mt-1">
-                  Generated: {q.generatedAt}
-                </div>
+                <div className="text-xs text-white/50 mt-1">Generated: {q.generatedAt}</div>
 
                 <div className="mt-3 flex justify-center">
                   <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
                 </div>
 
-                <div className="mt-2 text-xs text-white/40 break-all">
-                  Session: {q.session_id}
-                </div>
+                <div className="mt-2 text-xs text-white/40 break-all">Session: {q.session_id}</div>
               </div>
             ))}
           </div>
@@ -277,25 +347,20 @@ export default function AdminDashboardClient() {
               <th className="p-3 text-left">Slot</th>
               <th className="p-3 text-left">Exit Time</th>
               <th className="p-3 text-left">End Session</th>
-
-              {/* ✅ NEW COLUMN */}
-              
-
               <th className="p-3 text-left">QR</th>
               <th className="p-3 text-left">Entry</th>
             </tr>
           </thead>
 
           <tbody>
-            {rows.map((r) => {
-              const completed =
-                (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+            {filteredRows.map((r) => {
+              const completed = safeLower(r.status) === "ended" || !!r.exit_time;
 
               return (
                 <tr key={r.id} className="border-t border-white/10 hover:bg-white/5">
                   <td className="p-3">{dt(r.created_at)}</td>
-                  
 
+                  {/* Name list */}
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
                       <div className="space-y-2">
@@ -303,7 +368,9 @@ export default function AdminDashboardClient() {
                           <div key={(p.user_id || "") + "_" + idx} className="leading-snug">
                             <div className="font-semibold">
                               {p.full_name || "-"}
-                              {p.employee_id ? <span className="text-white/50 font-normal"> • {p.employee_id}</span> : null}
+                              {p.employee_id ? (
+                                <span className="text-white/50 font-normal"> • {p.employee_id}</span>
+                              ) : null}
                             </div>
                           </div>
                         ))}
@@ -313,6 +380,7 @@ export default function AdminDashboardClient() {
                     )}
                   </td>
 
+                  {/* Phone list */}
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
                       <div className="space-y-2">
@@ -327,6 +395,7 @@ export default function AdminDashboardClient() {
                     )}
                   </td>
 
+                  {/* Email list */}
                   <td className="p-3">
                     {Array.isArray(r.people) && r.people.length > 0 ? (
                       <div className="space-y-2">
@@ -341,12 +410,9 @@ export default function AdminDashboardClient() {
                     )}
                   </td>
 
-                  
                   <td className="p-3">{r.game_name || "-"}</td>
                   <td className="p-3">{r.players ?? "-"}</td>
-                  <td className="p-3">
-                    {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
-                  </td>
+                  <td className="p-3">{r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}</td>
                   <td className="p-3">{t(r.exit_time)}</td>
 
                   <td className="p-3">
@@ -362,9 +428,6 @@ export default function AdminDashboardClient() {
                     )}
                   </td>
 
-                  {/* ✅ NEW: Entry column delete */}
-                  
-
                   <td className="p-3">
                     {completed ? (
                       <span className="text-green-400 font-semibold">Session Completed</span>
@@ -378,6 +441,7 @@ export default function AdminDashboardClient() {
                       </button>
                     )}
                   </td>
+
                   <td className="p-3">
                     <button
                       onClick={() => setDeleteTarget(r)}
@@ -390,7 +454,7 @@ export default function AdminDashboardClient() {
               );
             })}
 
-            {rows.length === 0 && (
+            {filteredRows.length === 0 && (
               <tr>
                 <td className="p-4 text-white/60" colSpan={11}>
                   No sessions found.
@@ -401,7 +465,7 @@ export default function AdminDashboardClient() {
         </table>
       </div>
 
-      {/* END SESSION MODAL (unchanged) */}
+      {/* END SESSION MODAL */}
       {endTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
@@ -409,7 +473,7 @@ export default function AdminDashboardClient() {
               <div>
                 <div className="text-lg font-semibold">End this session?</div>
                 <div className="text-sm text-white/60 mt-1">
-                  If slot time is already passed, exit time will be slot end. Otherwise exit time will be now.
+                  Exit time should be the click time (handled in your API).
                 </div>
               </div>
               <button onClick={() => setEndTarget(null)}>✕</button>
@@ -447,7 +511,7 @@ export default function AdminDashboardClient() {
         </div>
       )}
 
-      {/* ✅ NEW: DELETE CONFIRM MODAL */}
+      {/* DELETE CONFIRM MODAL */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
@@ -481,10 +545,6 @@ export default function AdminDashboardClient() {
                   if (!ok) return;
 
                   setDeleteTarget(null);
-
-                  // ✅ Remove from UI instantly (fast) + refresh (safe)
-                  setRows((prev) => prev.filter((x) => x.id !== target.id));
-                  setQrs((prev) => prev.filter((q) => q.session_id !== target.id));
                   await load();
                 }}
                 className="flex-1 rounded-xl bg-red-600 py-2.5 font-semibold hover:bg-red-500 disabled:opacity-50"
