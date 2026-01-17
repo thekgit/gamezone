@@ -30,6 +30,7 @@ export async function GET() {
         visitor_name,
         visitor_phone,
         visitor_email,
+        closed_at,
         games:game_id ( name )
       `
       )
@@ -120,7 +121,7 @@ export async function GET() {
           slot_start: s.started_at ?? null,
           slot_end: s.ends_at ?? null,
 
-          exit_time: s.ended_at ?? null,
+          exit_time: s.closed_at ?? s.ended_at ?? null,
           status: s.status ?? null,
           players: s.players ?? null,
         };
