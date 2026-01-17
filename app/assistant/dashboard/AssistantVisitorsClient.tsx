@@ -256,12 +256,12 @@ export default function AssistantVisitorsClient() {
               0 0 44px rgba(0, 0, 0, 0);
           }
           33% {
-            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10),
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
               0 0 22px var(--g2),
               0 0 44px rgba(0, 0, 0, 0);
           }
           66% {
-            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10),
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1),
               0 0 22px var(--g3),
               0 0 44px rgba(0, 0, 0, 0);
           }
@@ -289,7 +289,7 @@ export default function AssistantVisitorsClient() {
           inset: -40%;
           background: radial-gradient(circle at 30% 30%, var(--g1), transparent 45%),
             radial-gradient(circle at 70% 70%, var(--g2), transparent 45%);
-          opacity: 0.30;
+          opacity: 0.3;
           filter: blur(26px);
           pointer-events: none;
         }
@@ -299,7 +299,7 @@ export default function AssistantVisitorsClient() {
           inset: 0;
           background: linear-gradient(
             135deg,
-            rgba(255, 255, 255, 0.10),
+            rgba(255, 255, 255, 0.1),
             rgba(255, 255, 255, 0.02)
           );
           opacity: 0.35;
@@ -317,13 +317,13 @@ export default function AssistantVisitorsClient() {
           padding: 6px 10px;
           border-radius: 999px;
           background: rgba(255, 255, 255, 0.07);
-          border: 1px solid rgba(255, 255, 255, 0.10);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           font-size: 12px;
           color: rgba(255, 255, 255, 0.78);
           white-space: nowrap;
         }
         .muted {
-          color: rgba(255, 255, 255, 0.60);
+          color: rgba(255, 255, 255, 0.6);
         }
         .muted2 {
           color: rgba(255, 255, 255, 0.45);
@@ -364,11 +364,9 @@ export default function AssistantVisitorsClient() {
                 className="noteCard p-5"
                 style={
                   {
-                    // per-card glow colors
                     ["--g1" as any]: g1,
                     ["--g2" as any]: g2,
                     ["--g3" as any]: g3,
-                    // slightly different animation offsets per card
                     animationDelay: `${(h % 13) * -0.27}s`,
                   } as any
                 }
@@ -378,9 +376,7 @@ export default function AssistantVisitorsClient() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs muted2">{dt(r.created_at)}</div>
-                      <div className="mt-1 text-lg font-semibold">
-                        {r.game_name || "Session"}
-                      </div>
+                      <div className="mt-1 text-lg font-semibold">{r.game_name || "Session"}</div>
                       <div className="mt-1 text-sm muted">
                         {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
                       </div>
@@ -413,8 +409,7 @@ export default function AssistantVisitorsClient() {
                               ) : null}
                             </div>
                             <div className="text-xs muted">
-                              {p.phone || "-"}{" "}
-                              <span className="muted2">•</span>{" "}
+                              {p.phone || "-"} <span className="muted2">•</span>{" "}
                               <span className="break-all">{p.email || "-"}</span>
                             </div>
                           </div>
@@ -425,20 +420,12 @@ export default function AssistantVisitorsClient() {
                     )}
                   </div>
 
-                  {/* actions */}
+                  {/* actions (End Session button removed) */}
                   <div className="mt-4 flex items-center gap-2">
-                    <button
-                      onClick={() => setEndTarget(r)}
-                      disabled={completed}
-                      className="flex-1 rounded-xl bg-white/10 px-4 py-2.5 font-semibold hover:bg-white/15 disabled:opacity-40"
-                    >
-                      End Session
-                    </button>
-
                     <button
                       onClick={() => genQr(r)}
                       disabled={completed || !!generating[r.id]}
-                      className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 font-semibold hover:bg-blue-500 disabled:opacity-40"
+                      className="w-full rounded-xl bg-blue-600 px-4 py-2.5 font-semibold hover:bg-blue-500 disabled:opacity-40"
                     >
                       {generating[r.id] ? "Generating..." : "Generate QR"}
                     </button>
@@ -450,9 +437,7 @@ export default function AssistantVisitorsClient() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="text-xs font-semibold">{qr.label}</div>
                         <button
-                          onClick={() =>
-                            setQrs((prev) => prev.filter((x) => x.session_id !== r.id))
-                          }
+                          onClick={() => setQrs((prev) => prev.filter((x) => x.session_id !== r.id))}
                           className="h-7 w-7 rounded-full bg-white/10 hover:bg-white/15 grid place-items-center"
                           title="Close"
                         >
@@ -464,9 +449,7 @@ export default function AssistantVisitorsClient() {
                         <img src={qr.dataUrl} alt="Exit QR" className="rounded-xl" />
                       </div>
 
-                      <div className="mt-2 text-xs muted2 break-all">
-                        Session: {qr.session_id}
-                      </div>
+                      <div className="mt-2 text-xs muted2 break-all">Session: {qr.session_id}</div>
                     </div>
                   )}
                 </div>
@@ -481,7 +464,7 @@ export default function AssistantVisitorsClient() {
           )}
         </div>
 
-        {/* End session modal */}
+        {/* End session modal (kept exactly as-is, even though button is removed) */}
         {endTarget && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-950 p-5 text-white">
