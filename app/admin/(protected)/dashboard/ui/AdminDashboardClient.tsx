@@ -231,7 +231,6 @@ export default function AdminDashboardClient() {
   const endSession = async (r: Row) => {
     setEndErr("");
     setEnding(true);
-
     try {
       const res = await fetch("/api/admin/visitors/end-session", {
         method: "POST",
@@ -239,15 +238,27 @@ export default function AdminDashboardClient() {
         credentials: "include",
         body: JSON.stringify({ session_id: r.id }),
       });
-
+  
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setEndErr(data?.error || "Failed to end session");
         return false;
       }
-
-      // ✅ After success, refresh list + drop QR for this session
+  
+      // ✅ FORCE UI to display the click time returned by server
+      const clickTime = data?.closed_at_after || data?.ended_at_after || data?.clickedAt || new Date().toISOString();
+  
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? { ...x, status: "ended", exit_time: clickTime }
+            : x
+        )
+      );
+  
+      // also remove QR if exists
       setQrs((prev) => prev.filter((q) => q.session_id !== r.id));
+  
       return true;
     } catch (e: any) {
       setEndErr(e?.message || "Failed to end session");
