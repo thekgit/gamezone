@@ -21,7 +21,7 @@ type Row = {
   phone: string | null;
   email: string | null;
 
-  // ✅ IMPORTANT (what admin uses)
+  // important
   people?: RowPerson[];
 
   game_name: string | null;
@@ -49,10 +49,11 @@ function dt(iso?: string | null) {
 
 function t(iso?: string | null) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function isCompleted(r: Row) {
+  return (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
 }
 
 export default function AssistantVisitorsClient() {
@@ -61,12 +62,50 @@ export default function AssistantVisitorsClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
 
-  const [qrs, setQrs] = useState<QrItem[]>([]);
+  // ✅ Keep ONLY ONE QR per session (no duplicates)
+  const [qrBySession, setQrBySession] = useState<Record<string, QrItem>>({});
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
   const [endTarget, setEndTarget] = useState<Row | null>(null);
   const [ending, setEnding] = useState(false);
   const [endErr, setEndErr] = useState("");
+
+  const makePeopleBlock = (r: Row) => {
+    const people = Array.isArray(r.people) && r.people.length > 0 ? r.people : null;
+
+    // fallback: single legacy fields
+    if (!people) {
+      return {
+        names: [r.full_name || "-"],
+        phones: [r.phone || "-"],
+        emails: [r.email || "-"],
+      };
+    }
+
+    return {
+      names: people.map((p) => {
+        const nm = p.full_name || "-";
+        const emp = p.employee_id ? ` • ${p.employee_id}` : "";
+        return `${nm}${emp}`;
+      }),
+      phones: people.map((p) => p.phone || "-"),
+      emails: people.map((p) => p.email || "-"),
+    };
+  };
+
+  const makeLabel = (r: Row) => {
+    const block = makePeopleBlock(r);
+    const namePart = block.names.join(" | ");
+
+    return [
+      namePart,
+      r.game_name ? `• ${r.game_name}` : "",
+      r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
+      typeof r.players === "number" ? `• Players: ${r.players}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  };
 
   const load = async () => {
     setMsg("");
@@ -88,7 +127,8 @@ export default function AssistantVisitorsClient() {
         return;
       }
 
-      setRows((data.rows || []) as Row[]);
+      const newRows = (data.rows || []) as Row[];
+      setRows(newRows);
     } catch {
       setMsg("Failed to load");
     }
@@ -101,51 +141,35 @@ export default function AssistantVisitorsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const completedMap = useMemo(() => {
-    const m = new Map<string, boolean>();
-    for (const r of rows) {
-      const completed =
-        (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
-      m.set(r.id, completed);
-    }
-    return m;
-  }, [rows]);
-  // ✅ assistant API returns ONLY active rows.
-// So once a session ends, it disappears from rows.
-// Remove QRs that are not present in active rows anymore.
+  // ✅ Keep QR only for sessions that are still visible in this active list
   useEffect(() => {
     const activeIds = new Set(rows.map((r) => r.id));
-    setQrs((prev) => prev.filter((q) => activeIds.has(q.session_id)));
+    setQrBySession((prev) => {
+      const next: Record<string, QrItem> = {};
+      for (const [sid, item] of Object.entries(prev)) {
+        if (activeIds.has(sid)) next[sid] = item;
+      }
+      return next;
+    });
   }, [rows]);
-  // ✅ remove QR cards for completed sessions
+
+  // ✅ If any row becomes completed (ended), remove its QR too
+  const completedMap = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const r of rows) m.set(r.id, isCompleted(r));
+    return m;
+  }, [rows]);
+
   useEffect(() => {
-    setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
+    setQrBySession((prev) => {
+      const next: Record<string, QrItem> = {};
+      for (const [sid, item] of Object.entries(prev)) {
+        if (!completedMap.get(sid)) next[sid] = item;
+      }
+      return next;
+    });
   }, [completedMap]);
 
-  // ✅ make label similar to admin
-  const makeLabel = (r: Row) => {
-    const namePart =
-      Array.isArray(r.people) && r.people.length > 0
-        ? r.people
-            .map((p) =>
-              [p.full_name || "-", p.employee_id ? `• ${p.employee_id}` : ""]
-                .filter(Boolean)
-                .join(" ")
-            )
-            .join(" | ")
-        : r.full_name || "(No name)";
-
-    return [
-      namePart,
-      r.game_name ? `• ${r.game_name}` : "",
-      r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
-      typeof r.players === "number" ? `• Players: ${r.players}` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-  };
-
-  // ✅ FIXED: regenerate QR in same place (no duplicates)
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -162,9 +186,7 @@ export default function AssistantVisitorsClient() {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMsg(
-          (data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`
-        );
+        setMsg((data?.error || "Failed to generate QR") + ` (HTTP ${res.status})`);
         return;
       }
 
@@ -174,7 +196,7 @@ export default function AssistantVisitorsClient() {
         return;
       }
 
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
+      const dataUrl = await QRCode.toDataURL(exit_url, { width: 220, margin: 1 });
 
       const item: QrItem = {
         session_id,
@@ -184,11 +206,8 @@ export default function AssistantVisitorsClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      // ✅ SAME AS ADMIN: replace QR for this session only
-      setQrs((prev) => {
-        const withoutThis = prev.filter((x) => x.session_id !== session_id);
-        return [item, ...withoutThis];
-      });
+      // ✅ Replace QR for this card only (fixed place)
+      setQrBySession((prev) => ({ ...prev, [session_id]: item }));
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
@@ -228,13 +247,12 @@ export default function AssistantVisitorsClient() {
 
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
-      <div className="mx-auto w-full max-w-6xl space-y-6">
-        <div className="flex items-center justify-between gap-3">
+      {/* tablet friendly */}
+      <div className="mx-auto w-full max-w-5xl space-y-6">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
-            <p className="text-white/60 text-sm">
-              Visitors
-            </p>
+            <p className="text-white/60 text-sm">Visitors (Active only) • Limited access</p>
           </div>
 
           <button
@@ -247,179 +265,161 @@ export default function AssistantVisitorsClient() {
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* ✅ QR PANEL (same behavior as admin) */}
-        {qrs.length > 0 && (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="font-semibold mb-3">Generated Exit QRs</div>
+        {/* ✅ Cards grid (note style) */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((r) => {
+            const completed = isCompleted(r);
+            const block = makePeopleBlock(r);
+            const qr = qrBySession[r.id];
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {qrs.map((q) => (
-                <div
-                  key={q.session_id}
-                  className="rounded-xl border border-white/10 bg-black/30 p-3"
-                >
-                  <div className="text-sm font-semibold">{q.label}</div>
-                  <div className="text-xs text-white/50 mt-1">
-                    Generated: {q.generatedAt}
+            return (
+              <div
+                key={r.id}
+                className="
+                  group relative overflow-hidden rounded-3xl
+                  border border-white/10 bg-white/[0.04]
+                  shadow-[0_0_0_1px_rgba(255,255,255,0.02)]
+                  transition
+                  hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.06]
+                "
+              >
+                {/* top-right tiny meta */}
+                <div className="absolute right-4 top-4">
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">
+                    {completed ? "Ended" : "Active"}
+                  </span>
+                </div>
+
+                {/* Card content */}
+                <div className="p-6 space-y-4">
+                  {/* Title area like note */}
+                  <div className="space-y-1 pr-20">
+                    <div className="text-xs text-white/50">{dt(r.created_at)}</div>
+                    <div className="text-lg font-semibold leading-tight">
+                      {r.game_name || "Session"}
+                    </div>
+                    <div className="text-sm text-white/60">
+                      {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
+                      {typeof r.players === "number" ? ` • Players: ${r.players}` : ""}
+                    </div>
                   </div>
 
-                  <div className="mt-3 flex justify-center">
-                    <img src={q.dataUrl} alt="Exit QR" className="rounded-lg" />
+                  {/* People block (like admin) */}
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <div className="text-xs text-white/50 mb-1">Names</div>
+                      <div className="space-y-1">
+                        {block.names.map((x, idx) => (
+                          <div key={idx} className="text-sm font-semibold text-white/90">
+                            {x}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                        <div className="text-xs text-white/50 mb-1">Phone</div>
+                        <div className="space-y-1">
+                          {block.phones.map((x, idx) => (
+                            <div key={idx} className="text-sm text-white/80">
+                              {x}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                        <div className="text-xs text-white/50 mb-1">Email</div>
+                        <div className="space-y-1">
+                          {block.emails.map((x, idx) => (
+                            <div key={idx} className="text-sm text-white/80 break-all">
+                              {x}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="mt-2 text-xs text-white/40 break-all">
-                    Session: {q.session_id}
+                  {/* QR area (generated inside card) */}
+                  {qr && !completed && (
+                    <div className="relative rounded-2xl border border-white/10 bg-black/30 p-3">
+                      {/* small cross */}
+                      <button
+                        onClick={() =>
+                          setQrBySession((prev) => {
+                            const next = { ...prev };
+                            delete next[r.id];
+                            return next;
+                          })
+                        }
+                        className="absolute right-2 top-2 rounded-lg bg-white/10 px-2 py-1 text-xs text-white/70 hover:bg-white/15"
+                        aria-label="Close QR"
+                        title="Close"
+                      >
+                        ✕
+                      </button>
+
+                      <div className="text-xs text-white/50 pr-10">Exit QR</div>
+                      <div className="mt-2 flex items-center justify-center">
+                        <img src={qr.dataUrl} alt="Exit QR" className="rounded-xl" />
+                      </div>
+                      <div className="mt-2 text-[11px] text-white/40">
+                        Generated: {qr.generatedAt}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Actions (bottom like Apply now) */}
+                  <div className="pt-1 flex items-center justify-between gap-3">
+                    <div className="text-xs text-white/40">
+                      {completed ? "Completed" : "Ready"}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setEndTarget(r)}
+                        disabled={completed}
+                        className="
+                          rounded-2xl bg-white/10 px-4 py-2 text-sm font-semibold
+                          hover:bg-white/15 disabled:opacity-40
+                        "
+                      >
+                        End Session
+                      </button>
+
+                      <button
+                        onClick={() => genQr(r)}
+                        disabled={completed || !!generating[r.id]}
+                        className="
+                          rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold
+                          hover:bg-blue-500 disabled:opacity-40
+                        "
+                      >
+                        {generating[r.id] ? "Generating..." : qr ? "Re-generate QR" : "Generate QR"}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              ))}
+
+                {/* subtle hover sheen */}
+                <div
+                  className="
+                    pointer-events-none absolute inset-0 opacity-0
+                    group-hover:opacity-100 transition
+                    bg-gradient-to-br from-white/10 via-transparent to-transparent
+                  "
+                />
+              </div>
+            );
+          })}
+
+          {rows.length === 0 && (
+            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-white/60">
+              No active sessions found.
             </div>
-          </div>
-        )}
-
-        {/* ✅ TABLE (same columns like admin, minus delete entry) */}
-        <div className="overflow-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
-          <table className="w-full text-sm min-w-[1200px]">
-            <thead className="bg-white/5 text-white/70">
-              <tr>
-                <th className="p-3 text-left">Timestamp</th>
-                <th className="p-3 text-left">Name</th>
-                <th className="p-3 text-left">Phone</th>
-                <th className="p-3 text-left">Email</th>
-                <th className="p-3 text-left">Game</th>
-                <th className="p-3 text-left">Players</th>
-                <th className="p-3 text-left">Slot</th>
-                <th className="p-3 text-left">Exit Time</th>
-                <th className="p-3 text-left">End Session</th>
-                <th className="p-3 text-left">QR</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {rows.map((r) => {
-                const completed =
-                  (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
-
-                return (
-                  <tr
-                    key={r.id}
-                    className="border-t border-white/10 hover:bg-white/5"
-                  >
-                    <td className="p-3">{dt(r.created_at)}</td>
-
-                    {/* ✅ names list like admin */}
-                    <td className="p-3">
-                      {Array.isArray(r.people) && r.people.length > 0 ? (
-                        <div className="space-y-2">
-                          {r.people.map((p, idx) => (
-                            <div
-                              key={(p.user_id || "") + "_" + idx}
-                              className="leading-snug"
-                            >
-                              <div className="font-semibold">
-                                {p.full_name || "-"}
-                                {p.employee_id ? (
-                                  <span className="text-white/50 font-normal">
-                                    {" "}
-                                    • {p.employee_id}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        r.full_name || "-"
-                      )}
-                    </td>
-
-                    {/* ✅ phone list like admin */}
-                    <td className="p-3">
-                      {Array.isArray(r.people) && r.people.length > 0 ? (
-                        <div className="space-y-2">
-                          {r.people.map((p, idx) => (
-                            <div
-                              key={(p.user_id || "") + "_ph_" + idx}
-                              className="text-white/80"
-                            >
-                              {p.phone || "-"}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        r.phone || "-"
-                      )}
-                    </td>
-
-                    {/* ✅ email list like admin */}
-                    <td className="p-3">
-                      {Array.isArray(r.people) && r.people.length > 0 ? (
-                        <div className="space-y-2">
-                          {r.people.map((p, idx) => (
-                            <div
-                              key={(p.user_id || "") + "_em_" + idx}
-                              className="text-white/80 break-all"
-                            >
-                              {p.email || "-"}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        r.email || "-"
-                      )}
-                    </td>
-
-                    <td className="p-3">{r.game_name || "-"}</td>
-                    <td className="p-3">{r.players ?? "-"}</td>
-                    <td className="p-3">
-                      {r.slot_start
-                        ? `${t(r.slot_start)} – ${t(r.slot_end)}`
-                        : "-"}
-                    </td>
-                    <td className="p-3">{t(r.exit_time)}</td>
-
-                    <td className="p-3">
-                      {completed ? (
-                        <span className="text-green-400 font-semibold">
-                          Completed
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => setEndTarget(r)}
-                          className="rounded-lg bg-white/10 px-3 py-2 font-semibold hover:bg-white/15"
-                        >
-                          End Session
-                        </button>
-                      )}
-                    </td>
-
-                    <td className="p-3">
-                      {completed ? (
-                        <span className="text-green-400 font-semibold">
-                          Session Completed
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => genQr(r)}
-                          disabled={!!generating[r.id]}
-                          className="rounded-lg bg-blue-600 px-3 py-2 font-semibold hover:bg-blue-500 disabled:opacity-40"
-                        >
-                          {generating[r.id] ? "Generating..." : "Generate QR"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {rows.length === 0 && (
-                <tr>
-                  <td className="p-4 text-white/60" colSpan={10}>
-                    No active sessions found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          )}
         </div>
 
         {/* End session modal */}
@@ -430,7 +430,7 @@ export default function AssistantVisitorsClient() {
                 <div>
                   <div className="text-lg font-semibold">End this session?</div>
                   <div className="text-sm text-white/60 mt-1">
-                    This will mark session as ended and it will disappear from Assistant view.
+                    This will end the session (only then it disappears from active views).
                   </div>
                 </div>
                 <button onClick={() => setEndTarget(null)}>✕</button>
@@ -455,9 +455,14 @@ export default function AssistantVisitorsClient() {
                     const ok = await endSession(target);
                     if (!ok) return;
 
-                    setEndTarget(null);
-                    setQrs((prev) => prev.filter((q) => q.session_id !== target.id));
+                    // remove QR immediately (UI)
+                    setQrBySession((prev) => {
+                      const next = { ...prev };
+                      delete next[target.id];
+                      return next;
+                    });
 
+                    setEndTarget(null);
                     await load();
                   }}
                   className="flex-1 rounded-xl bg-blue-600 py-2.5 font-semibold disabled:opacity-50"
