@@ -16,12 +16,10 @@ type Row = {
   id: string;
   created_at: string;
 
-  // legacy (keep)
   full_name: string | null;
   phone: string | null;
   email: string | null;
 
-  // important
   people?: RowPerson[];
 
   game_name: string | null;
@@ -46,14 +44,22 @@ function dt(iso?: string | null) {
   if (!iso) return "-";
   return new Date(iso).toLocaleString();
 }
-
 function t(iso?: string | null) {
   if (!iso) return "-";
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function isCompleted(r: Row) {
-  return (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+// ---- stable "random" from a string (session_id) ----
+function hashToInt(str: string) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) || 1;
+}
+function pick<T>(arr: T[], idx: number) {
+  return arr[idx % arr.length];
 }
 
 export default function AssistantVisitorsClient() {
@@ -62,50 +68,12 @@ export default function AssistantVisitorsClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [msg, setMsg] = useState("");
 
-  // ✅ Keep ONLY ONE QR per session (no duplicates)
-  const [qrBySession, setQrBySession] = useState<Record<string, QrItem>>({});
+  const [qrs, setQrs] = useState<QrItem[]>([]);
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
 
   const [endTarget, setEndTarget] = useState<Row | null>(null);
   const [ending, setEnding] = useState(false);
   const [endErr, setEndErr] = useState("");
-
-  const makePeopleBlock = (r: Row) => {
-    const people = Array.isArray(r.people) && r.people.length > 0 ? r.people : null;
-
-    // fallback: single legacy fields
-    if (!people) {
-      return {
-        names: [r.full_name || "-"],
-        phones: [r.phone || "-"],
-        emails: [r.email || "-"],
-      };
-    }
-
-    return {
-      names: people.map((p) => {
-        const nm = p.full_name || "-";
-        const emp = p.employee_id ? ` • ${p.employee_id}` : "";
-        return `${nm}${emp}`;
-      }),
-      phones: people.map((p) => p.phone || "-"),
-      emails: people.map((p) => p.email || "-"),
-    };
-  };
-
-  const makeLabel = (r: Row) => {
-    const block = makePeopleBlock(r);
-    const namePart = block.names.join(" | ");
-
-    return [
-      namePart,
-      r.game_name ? `• ${r.game_name}` : "",
-      r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
-      typeof r.players === "number" ? `• Players: ${r.players}` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-  };
 
   const load = async () => {
     setMsg("");
@@ -121,14 +89,11 @@ export default function AssistantVisitorsClient() {
         router.replace("/assistant/login");
         return;
       }
-
       if (!res.ok) {
         setMsg((data?.error || "Failed to load") + ` (HTTP ${res.status})`);
         return;
       }
-
-      const newRows = (data.rows || []) as Row[];
-      setRows(newRows);
+      setRows((data.rows || []) as Row[]);
     } catch {
       setMsg("Failed to load");
     }
@@ -141,35 +106,47 @@ export default function AssistantVisitorsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Keep QR only for sessions that are still visible in this active list
-  useEffect(() => {
-    const activeIds = new Set(rows.map((r) => r.id));
-    setQrBySession((prev) => {
-      const next: Record<string, QrItem> = {};
-      for (const [sid, item] of Object.entries(prev)) {
-        if (activeIds.has(sid)) next[sid] = item;
-      }
-      return next;
-    });
-  }, [rows]);
-
-  // ✅ If any row becomes completed (ended), remove its QR too
   const completedMap = useMemo(() => {
     const m = new Map<string, boolean>();
-    for (const r of rows) m.set(r.id, isCompleted(r));
+    for (const r of rows) {
+      const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+      m.set(r.id, completed);
+    }
     return m;
   }, [rows]);
 
+  // assistant API returns ONLY active -> remove QR cards that are no longer in rows
   useEffect(() => {
-    setQrBySession((prev) => {
-      const next: Record<string, QrItem> = {};
-      for (const [sid, item] of Object.entries(prev)) {
-        if (!completedMap.get(sid)) next[sid] = item;
-      }
-      return next;
-    });
+    const activeIds = new Set(rows.map((r) => r.id));
+    setQrs((prev) => prev.filter((q) => activeIds.has(q.session_id)));
+  }, [rows]);
+
+  // remove QRs for completed sessions (extra safety)
+  useEffect(() => {
+    setQrs((prev) => prev.filter((q) => !completedMap.get(q.session_id)));
   }, [completedMap]);
 
+  const makeLabel = (r: Row) => {
+    const namePart =
+      Array.isArray(r.people) && r.people.length > 0
+        ? r.people
+            .map((p) =>
+              [p.full_name || "-", p.employee_id ? `• ${p.employee_id}` : ""].filter(Boolean).join(" ")
+            )
+            .join(" | ")
+        : r.full_name || "(No name)";
+
+    return [
+      namePart,
+      r.game_name ? `• ${r.game_name}` : "",
+      r.slot_start ? `• ${t(r.slot_start)}–${t(r.slot_end)}` : "",
+      typeof r.players === "number" ? `• Players: ${r.players}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  };
+
+  // ✅ regenerate QR in same place (no duplicates)
   const genQr = async (r: Row) => {
     const session_id = r.id;
 
@@ -196,7 +173,7 @@ export default function AssistantVisitorsClient() {
         return;
       }
 
-      const dataUrl = await QRCode.toDataURL(exit_url, { width: 220, margin: 1 });
+      const dataUrl = await QRCode.toDataURL(exit_url, { width: 240, margin: 1 });
 
       const item: QrItem = {
         session_id,
@@ -206,8 +183,11 @@ export default function AssistantVisitorsClient() {
         generatedAt: new Date().toLocaleString(),
       };
 
-      // ✅ Replace QR for this card only (fixed place)
-      setQrBySession((prev) => ({ ...prev, [session_id]: item }));
+      // replace existing QR for this session
+      setQrs((prev) => {
+        const withoutThis = prev.filter((x) => x.session_id !== session_id);
+        return [item, ...withoutThis];
+      });
     } catch (e: any) {
       setMsg(`Generate QR failed: ${e?.message || "Unknown error"}`);
     } finally {
@@ -245,11 +225,113 @@ export default function AssistantVisitorsClient() {
     router.replace("/assistant/login");
   };
 
+  // ---- glow palettes (we'll pick 2-3 based on session id) ----
+  const glowPalettes = [
+    // cyan -> blue -> violet
+    ["rgba(34,211,238,.55)", "rgba(59,130,246,.55)", "rgba(139,92,246,.55)"],
+    // pink -> rose -> amber
+    ["rgba(236,72,153,.55)", "rgba(244,63,94,.55)", "rgba(245,158,11,.55)"],
+    // lime -> emerald -> teal
+    ["rgba(163,230,53,.55)", "rgba(16,185,129,.55)", "rgba(20,184,166,.55)"],
+    // orange -> red -> fuchsia
+    ["rgba(249,115,22,.55)", "rgba(239,68,68,.55)", "rgba(217,70,239,.55)"],
+    // indigo -> sky -> cyan
+    ["rgba(99,102,241,.55)", "rgba(56,189,248,.55)", "rgba(34,211,238,.55)"],
+  ];
+
+  const qrBySession = useMemo(() => {
+    const m = new Map<string, QrItem>();
+    for (const q of qrs) m.set(q.session_id, q);
+    return m;
+  }, [qrs]);
+
   return (
     <main className="min-h-screen bg-black text-white px-4 py-8">
-      {/* tablet friendly */}
-      <div className="mx-auto w-full max-w-5xl space-y-6">
-        <div className="flex items-start justify-between gap-3">
+      <style jsx global>{`
+        /* Animated glowing accent (driven by CSS variables per card) */
+        @keyframes glowShift {
+          0% {
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
+              0 0 22px var(--g1),
+              0 0 44px rgba(0, 0, 0, 0);
+          }
+          33% {
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10),
+              0 0 22px var(--g2),
+              0 0 44px rgba(0, 0, 0, 0);
+          }
+          66% {
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10),
+              0 0 22px var(--g3),
+              0 0 44px rgba(0, 0, 0, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
+              0 0 22px var(--g1),
+              0 0 44px rgba(0, 0, 0, 0);
+          }
+        }
+
+        /* Always-on hover feel */
+        .noteCard {
+          position: relative;
+          border-radius: 20px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          transform: translateZ(0);
+          transition: transform 220ms ease, background 220ms ease;
+          animation: glowShift 3.4s ease-in-out infinite;
+          overflow: hidden;
+        }
+        .noteCard::before {
+          content: "";
+          position: absolute;
+          inset: -40%;
+          background: radial-gradient(circle at 30% 30%, var(--g1), transparent 45%),
+            radial-gradient(circle at 70% 70%, var(--g2), transparent 45%);
+          opacity: 0.30;
+          filter: blur(26px);
+          pointer-events: none;
+        }
+        .noteCard::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.10),
+            rgba(255, 255, 255, 0.02)
+          );
+          opacity: 0.35;
+          pointer-events: none;
+        }
+        .noteCard:hover {
+          transform: translateY(-2px) scale(1.01);
+          background: rgba(255, 255, 255, 0.055);
+        }
+
+        .pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.07);
+          border: 1px solid rgba(255, 255, 255, 0.10);
+          font-size: 12px;
+          color: rgba(255, 255, 255, 0.78);
+          white-space: nowrap;
+        }
+        .muted {
+          color: rgba(255, 255, 255, 0.60);
+        }
+        .muted2 {
+          color: rgba(255, 255, 255, 0.45);
+        }
+      `}</style>
+
+      <div className="mx-auto w-full max-w-6xl space-y-6">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold">Assistant Panel</h1>
             <p className="text-white/60 text-sm">Visitors (Active only) • Limited access</p>
@@ -265,158 +347,136 @@ export default function AssistantVisitorsClient() {
 
         {msg && <div className="text-red-300 text-sm">{msg}</div>}
 
-        {/* ✅ Cards grid (note style) */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Cards */}
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {rows.map((r) => {
-            const completed = isCompleted(r);
-            const block = makePeopleBlock(r);
-            const qr = qrBySession[r.id];
+            const completed = (r.status || "").toLowerCase() === "ended" || !!r.exit_time;
+            const qr = qrBySession.get(r.id);
+
+            const h = hashToInt(r.id);
+            const palette = pick(glowPalettes, h);
+            const g1 = palette[0];
+            const g2 = palette[1];
+            const g3 = palette[2];
 
             return (
               <div
                 key={r.id}
-                className="
-                  group relative overflow-hidden rounded-3xl
-                  border border-white/10 bg-white/[0.04]
-                  shadow-[0_0_0_1px_rgba(255,255,255,0.02)]
-                  transition
-                  hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.06]
-                "
+                className="noteCard p-5"
+                style={
+                  {
+                    // per-card glow colors
+                    ["--g1" as any]: g1,
+                    ["--g2" as any]: g2,
+                    ["--g3" as any]: g3,
+                    // slightly different animation offsets per card
+                    animationDelay: `${(h % 13) * -0.27}s`,
+                  } as any
+                }
               >
-                {/* top-right tiny meta */}
-                <div className="absolute right-4 top-4">
-                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">
-                    {completed ? "Ended" : "Active"}
-                  </span>
-                </div>
-
-                {/* Card content */}
-                <div className="p-6 space-y-4">
-                  {/* Title area like note */}
-                  <div className="space-y-1 pr-20">
-                    <div className="text-xs text-white/50">{dt(r.created_at)}</div>
-                    <div className="text-lg font-semibold leading-tight">
-                      {r.game_name || "Session"}
+                <div className="relative z-10">
+                  {/* header row */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs muted2">{dt(r.created_at)}</div>
+                      <div className="mt-1 text-lg font-semibold">
+                        {r.game_name || "Session"}
+                      </div>
+                      <div className="mt-1 text-sm muted">
+                        {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
+                      </div>
                     </div>
-                    <div className="text-sm text-white/60">
-                      {r.slot_start ? `${t(r.slot_start)} – ${t(r.slot_end)}` : "-"}
-                      {typeof r.players === "number" ? ` • Players: ${r.players}` : ""}
+
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="pill">Players: {r.players ?? "-"}</span>
+                      {completed ? (
+                        <span className="pill" style={{ borderColor: "rgba(34,197,94,0.35)" }}>
+                          ✅ Ended
+                        </span>
+                      ) : (
+                        <span className="pill">🟢 Active</span>
+                      )}
                     </div>
                   </div>
 
-                  {/* People block (like admin) */}
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                      <div className="text-xs text-white/50 mb-1">Names</div>
-                      <div className="space-y-1">
-                        {block.names.map((x, idx) => (
-                          <div key={idx} className="text-sm font-semibold text-white/90">
-                            {x}
+                  {/* people */}
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <div className="text-xs muted2 mb-2">People</div>
+
+                    {Array.isArray(r.people) && r.people.length > 0 ? (
+                      <div className="space-y-2">
+                        {r.people.map((p, idx) => (
+                          <div key={(p.user_id || "") + "_" + idx} className="leading-snug">
+                            <div className="font-semibold">
+                              {p.full_name || "-"}
+                              {p.employee_id ? (
+                                <span className="text-white/50 font-normal"> • {p.employee_id}</span>
+                              ) : null}
+                            </div>
+                            <div className="text-xs muted">
+                              {p.phone || "-"}{" "}
+                              <span className="muted2">•</span>{" "}
+                              <span className="break-all">{p.email || "-"}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-white/50 mb-1">Phone</div>
-                        <div className="space-y-1">
-                          {block.phones.map((x, idx) => (
-                            <div key={idx} className="text-sm text-white/80">
-                              {x}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-                        <div className="text-xs text-white/50 mb-1">Email</div>
-                        <div className="space-y-1">
-                          {block.emails.map((x, idx) => (
-                            <div key={idx} className="text-sm text-white/80 break-all">
-                              {x}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    ) : (
+                      <div className="text-sm muted">No people data</div>
+                    )}
                   </div>
 
-                  {/* QR area (generated inside card) */}
-                  {qr && !completed && (
-                    <div className="relative rounded-2xl border border-white/10 bg-black/30 p-3">
-                      {/* small cross */}
-                      <button
-                        onClick={() =>
-                          setQrBySession((prev) => {
-                            const next = { ...prev };
-                            delete next[r.id];
-                            return next;
-                          })
-                        }
-                        className="absolute right-2 top-2 rounded-lg bg-white/10 px-2 py-1 text-xs text-white/70 hover:bg-white/15"
-                        aria-label="Close QR"
-                        title="Close"
-                      >
-                        ✕
-                      </button>
+                  {/* actions */}
+                  <div className="mt-4 flex items-center gap-2">
+                    <button
+                      onClick={() => setEndTarget(r)}
+                      disabled={completed}
+                      className="flex-1 rounded-xl bg-white/10 px-4 py-2.5 font-semibold hover:bg-white/15 disabled:opacity-40"
+                    >
+                      End Session
+                    </button>
 
-                      <div className="text-xs text-white/50 pr-10">Exit QR</div>
-                      <div className="mt-2 flex items-center justify-center">
+                    <button
+                      onClick={() => genQr(r)}
+                      disabled={completed || !!generating[r.id]}
+                      className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 font-semibold hover:bg-blue-500 disabled:opacity-40"
+                    >
+                      {generating[r.id] ? "Generating..." : "Generate QR"}
+                    </button>
+                  </div>
+
+                  {/* QR inline (generated on the card) */}
+                  {qr && !completed && (
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-xs font-semibold">{qr.label}</div>
+                        <button
+                          onClick={() =>
+                            setQrs((prev) => prev.filter((x) => x.session_id !== r.id))
+                          }
+                          className="h-7 w-7 rounded-full bg-white/10 hover:bg-white/15 grid place-items-center"
+                          title="Close"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex justify-center">
                         <img src={qr.dataUrl} alt="Exit QR" className="rounded-xl" />
                       </div>
-                      <div className="mt-2 text-[11px] text-white/40">
-                        Generated: {qr.generatedAt}
+
+                      <div className="mt-2 text-xs muted2 break-all">
+                        Session: {qr.session_id}
                       </div>
                     </div>
                   )}
-
-                  {/* Actions (bottom like Apply now) */}
-                  <div className="pt-1 flex items-center justify-between gap-3">
-                    <div className="text-xs text-white/40">
-                      {completed ? "Completed" : "Ready"}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setEndTarget(r)}
-                        disabled={completed}
-                        className="
-                          rounded-2xl bg-white/10 px-4 py-2 text-sm font-semibold
-                          hover:bg-white/15 disabled:opacity-40
-                        "
-                      >
-                        End Session
-                      </button>
-
-                      <button
-                        onClick={() => genQr(r)}
-                        disabled={completed || !!generating[r.id]}
-                        className="
-                          rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold
-                          hover:bg-blue-500 disabled:opacity-40
-                        "
-                      >
-                        {generating[r.id] ? "Generating..." : qr ? "Re-generate QR" : "Generate QR"}
-                      </button>
-                    </div>
-                  </div>
                 </div>
-
-                {/* subtle hover sheen */}
-                <div
-                  className="
-                    pointer-events-none absolute inset-0 opacity-0
-                    group-hover:opacity-100 transition
-                    bg-gradient-to-br from-white/10 via-transparent to-transparent
-                  "
-                />
               </div>
             );
           })}
 
           {rows.length === 0 && (
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6 text-white/60">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white/70">
               No active sessions found.
             </div>
           )}
@@ -430,7 +490,7 @@ export default function AssistantVisitorsClient() {
                 <div>
                   <div className="text-lg font-semibold">End this session?</div>
                   <div className="text-sm text-white/60 mt-1">
-                    This will end the session (only then it disappears from active views).
+                    This will mark session as ended and it will disappear from Assistant view.
                   </div>
                 </div>
                 <button onClick={() => setEndTarget(null)}>✕</button>
@@ -455,14 +515,9 @@ export default function AssistantVisitorsClient() {
                     const ok = await endSession(target);
                     if (!ok) return;
 
-                    // remove QR immediately (UI)
-                    setQrBySession((prev) => {
-                      const next = { ...prev };
-                      delete next[target.id];
-                      return next;
-                    });
-
                     setEndTarget(null);
+                    // immediately remove QR for that session
+                    setQrs((prev) => prev.filter((q) => q.session_id !== target.id));
                     await load();
                   }}
                   className="flex-1 rounded-xl bg-blue-600 py-2.5 font-semibold disabled:opacity-50"
