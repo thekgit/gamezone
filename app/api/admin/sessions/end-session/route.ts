@@ -19,22 +19,23 @@ export async function POST(req: Request) {
 
     const admin = supabaseAdmin();
 
-    // If already ended, just return ok
-    const { data: s, error: sErr } = await admin
+    // (optional safety) check session exists
+    const { data: s, error: fetchErr } = await admin
       .from("sessions")
       .select("id, ended_at, status")
       .eq("id", session_id)
       .single();
 
-    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
+    if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
     if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    const ended = !!s.ended_at || String(s.status || "").toLowerCase() === "ended";
-    if (ended) {
+    // ✅ If already ended, just return ok (idempotent)
+    const st = String(s.status || "").toLowerCase();
+    if (s.ended_at || st === "ended" || st === "completed") {
       return NextResponse.json({ ok: true, ended_at: s.ended_at }, { status: 200 });
     }
 
-    // ✅ IMPORTANT: use the click time ALWAYS
+    // ✅ IMPORTANT: ALWAYS use click time (NOW)
     const nowIso = new Date().toISOString();
 
     const { error: updErr } = await admin
@@ -46,6 +47,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, ended_at: nowIso }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }
